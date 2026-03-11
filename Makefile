@@ -122,6 +122,7 @@ compile: check-tools
 compile-all: check-tools
 	@echo "编译所有生成的汇编文件..."
 	@FOUND=0; \
+	FAILED=0; \
 	for file in $(OUTPUT_DIR)/template_*.S; do \
 		if [ -f "$$file" ]; then \
 			FOUND=1; \
@@ -138,12 +139,18 @@ compile-all: check-tools
 			echo "编译 $$file..."; \
 			$(PYTHON) $(COMPILE_HELPER) "$$file" -o "$(OUTPUT_DIR)/$$BASENAME" -x $$XLEN -e IMACFD -T $(LINKER_SCRIPT); \
 			if [ $$? -ne 0 ]; then \
-				echo "警告: 编译失败: $$BASENAME" >&2; \
+				echo "错误: 编译失败: $$BASENAME" >&2; \
+				FAILED=1; \
 			fi; \
 		fi \
 	done; \
 	if [ $$FOUND -eq 0 ]; then \
-		echo "警告: 未找到任何汇编文件" >&2; \
+		echo "错误: 未找到任何汇编文件" >&2; \
+		exit 1; \
+	fi; \
+	if [ $$FAILED -eq 1 ]; then \
+		echo "错误: 部分文件编译失败" >&2; \
+		exit 1; \
 	fi
 
 # 生成并编译所有
@@ -155,8 +162,14 @@ run:
 	@echo ""
 	@echo "编译汇编文件..."
 	@$(MAKE) --no-print-directory compile-all
-	@echo ""
-	@echo "完成!"
+	@if [ $$? -eq 0 ]; then \
+		echo ""; \
+		echo "完成!"; \
+	else \
+		echo ""; \
+		echo "错误: 编译失败" >&2; \
+		exit 1; \
+	fi
 
 # 清理生成的文件
 .PHONY: clean

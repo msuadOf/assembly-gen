@@ -213,8 +213,12 @@ def compile_assembly(
 
     # 添加架构参数
     if tools["source"] == "llvm":
-        # LLVM/clang 使用 --target 参数
-        cmd.extend(["--target", config.march])
+        # LLVM/clang 使用 -target (不是 --target)
+        # 目标三元组基于 xlen，扩展集通过 -march 传递
+        target_triple = "riscv32" if config.xlen == 32 else "riscv64"
+        cmd.extend(["-target", target_triple])
+        # clang 也需要 -march 和 -mabi
+        cmd.extend([f"-march={config.march}", f"-mabi={config.mabi}"])
     else:
         # GNU gcc 使用 -march 和 -mabi
         # 注意：某些 riscv-gnu-toolchain 版本使用等号格式

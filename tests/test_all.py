@@ -5,6 +5,7 @@ Assembly-Gen 单元测试和集成测试
 
 import sys
 import os
+import subprocess
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
@@ -559,6 +560,109 @@ class TestCompileVerification(unittest.TestCase):
 
             # 编译应该失败
             self.assertFalse(result.success)
+
+    def test_makefile_compile_failure_exits_nonzero(self):
+        """测试 Makefile 在编译坏文件时非零退出。"""
+        import tempfile
+        import subprocess
+
+        # 创建一个临时目录，其中包含一个坏汇编文件
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建坏的汇编文件
+            bad_asm = Path(tmpdir) / "template_bad.S"
+            bad_asm.write_text(
+                ".section .text\n"
+                ".globl _start\n"
+                "_start:\n"
+                "    invalid_instruction_xyz  # 无效指令\n"
+            )
+
+            # 创建好的汇编文件
+            good_asm = Path(tmpdir) / "template_ok.S"
+            good_asm.write_text(
+                ".section .text\n"
+                ".globl _start\n"
+                "_start:\n"
+                "    nop\n"
+                "    li a0, 0\n"
+                "    ecall\n"
+            )
+
+            # 尝试使用 compile-all 编译（通过 OUTPUT_DIR 指向临时目录）
+            result = subprocess.run(
+                ["make", "compile-all", f"OUTPUT_DIR={tmpdir}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=Path.cwd()
+            )
+
+            # 应该非零退出，因为编译失败
+            self.assertNotEqual(result.returncode, 0,
+                              f"compile-all 应该在编译失败时非零退出。stdout: {result.stdout}, stderr: {result.stderr}")
+            # stderr 应该包含错误消息
+            self.assertIn("编译失败", result.stderr)
+
+    def test_forced_llvm_toolchain(self):
+        """测试强制使用 LLVM 工具链（如果 clang 可用）。"""
+        from compile_helper import find_toolchain, CompilerConfig, compile_assembly
+
+        # 检查 clang 是否可用
+        try:
+            subprocess.run(["clang", "--version"], capture_output=True, timeout=5)
+            clang_available = True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            clang_available = False
+
+        if not clang_available:
+            self.skipTest("clang 不可用")
+
+        # 检查 llvm-objcopy 和 llvm-objdump
+        try:
+            subprocess.run(["llvm-objcopy", "--version"], capture_output=True, timeout=5)
+            subprocess.run(["llvm-objdump", "--version"], capture_output=True, timeout=5)
+            llvm_tools_available = True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            llvm_tools_available = False
+
+        if not llvm_tools_available:
+            self.skipTest("llvm-objcopy 或 llvm-objdump 不可用")
+
+        # 强制使用 LLVM 工具链
+        forced_tools = {
+            "gcc": "clang",
+            "objcopy": "llvm-objcopy",
+            "objdump": "llvm-objdump",
+            "source": "llvm"
+        }
+
+        import tempfile
+        from main import process_test_cases, load_json_spec
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 生成汇编文件
+            json_data = load_json_spec("resource/example.json")
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            # 使用强制 LLVM 工具链编译
+            config = CompilerConfig(32, "IMACFD")
+            elf_file = Path(tmpdir) / "test_llvm.elf"
+
+            result = compile_assembly(
+                generated_files[0],
+                str(elf_file),
+                config,
+                "linker.ld",
+                forced_tools
+            )
+
+            # 验证编译结果
+            self.assertTrue(result.success, f"LLVM 编译失败: {result.stderr}")
+            self.assertTrue(elf_file.exists())
 
 
 def run_tests():

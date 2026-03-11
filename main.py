@@ -90,7 +90,11 @@ class Value:
             )
 
     def _parse_binary(self, value_str: str, max_value: int) -> tuple:
-        """解析二进制格式，返回 (value, mask)。"""
+        """解析二进制格式，返回 (value, mask)。
+
+        Mask 语义：1 表示该位已知，0 表示该位未知。
+        零扩展的高位应标记为已知（值为 0）。
+        """
         # 验证二进制字符串只包含 0、1 和 x
         if not all(c in '01x' for c in value_str):
             raise ValueError(
@@ -106,20 +110,28 @@ class Value:
 
         # 构建 value 和 mask
         value = 0
-        mask = 0
+        mask = (1 << self.bits) - 1  # 初始化：所有位都已知
+
         for i, c in enumerate(reversed(value_str)):
             bit_pos = i
             if c == '1':
                 value |= (1 << bit_pos)
-                mask |= (1 << bit_pos)
+                # mask 位已置 1（已知）
             elif c == '0':
-                mask |= (1 << bit_pos)
-            # c == 'x' 时，不设置 value 和 mask 的对应位
+                # mask 位已置 1（已知）
+                pass
+            elif c == 'x':
+                # x 位：标记为未知
+                mask &= ~(1 << bit_pos)
 
         return value, mask
 
     def _parse_hex(self, value_str: str, max_value: int) -> tuple:
-        """解析十六进制格式，返回 (value, mask)。"""
+        """解析十六进制格式，返回 (value, mask)。
+
+        Mask 语义：1 表示该位已知，0 表示该位未知。
+        零扩展的高位应标记为已知（值为 0）。
+        """
         # 验证十六进制字符串
         if not all(c in '0123456789abcdefABCDEFx' for c in value_str):
             raise ValueError(
@@ -136,15 +148,18 @@ class Value:
 
         # 构建 value 和 mask
         value = 0
-        mask = 0
+        mask = (1 << self.bits) - 1  # 初始化：所有位都已知
+
         for i, c in enumerate(reversed(value_str)):
             nibble_pos = i * 4
             if c == 'x':
-                continue  # 不设置这些位的 mask
+                # x 位：标记这 4 位为未知
+                mask &= ~(0xF << nibble_pos)
+                continue
             # 解析十六进制字符
             nibble_value = int(c, 16)
             value |= (nibble_value << nibble_pos)
-            mask |= (0xF << nibble_pos)
+            # mask 位已置 1（已知）
 
         return value, mask
 
@@ -518,12 +533,17 @@ def validate_json_spec(json_data: Dict[str, Any]) -> None:
             raise ValueError(f"{prefix}: arch 缺少必需字段 'xlen'")
 
         # 检查 xlen 值
+        xlen_str = arch["xlen"]
+
+        # 首先检查是否为数字
         try:
-            xlen = int(arch["xlen"])
-            if xlen not in (32, 64):
-                raise ValueError(f"{prefix}: arch.xlen 必须是 32 或 64，收到: {xlen}")
+            xlen = int(xlen_str)
         except ValueError:
-            raise ValueError(f"{prefix}: arch.xlen 必须是数字，收到: {arch['xlen']}")
+            raise ValueError(f"{prefix}: arch.xlen 必须是数字，收到: {xlen_str}")
+
+        # 然后检查是否为有效值
+        if xlen not in (32, 64):
+            raise ValueError(f"{prefix}: arch.xlen 必须是 32 或 64，收到: {xlen}")
 
         # 检查 test-ins 字段
         if "test-ins" not in test_case:
