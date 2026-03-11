@@ -390,10 +390,11 @@ def parse_assembly_metadata(assembly_file: str, strict: bool = False) -> Compile
                     break
 
                 # 查找 "架构: RISC-V (xlen=..., ext=...)" 模式
-                match = re.search(r'架构:\s*RISC-V\s*\(\s*xlen=(\d+)\s*,\s*ext=([^\)]+)\s*\)', line)
+                # ext 可以为空，允许 ext= 格式
+                match = re.search(r'架构:\s*RISC-V\s*\(\s*xlen=(\d+)\s*,\s*ext=([^\)]*)\s*\)', line)
                 if match:
                     xlen = int(match.group(1))
-                    ext = match.group(2).strip()
+                    ext = match.group(2).strip()  # strip 处理空格
                     return CompilerConfig(xlen, ext)
     except FileNotFoundError:
         raise

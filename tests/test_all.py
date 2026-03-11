@@ -966,6 +966,147 @@ class TestCompileVerification(unittest.TestCase):
             elf_file = Path(f"{output_prefix}.elf")
             self.assertTrue(elf_file.exists(), f"ELF 文件未生成: {elf_file}")
 
+    def test_missing_ext_metadata_driven_compilation(self):
+        """测试省略 arch.ext 的有效 JSON 通过元数据驱动路径编译（如果工具链可用）。"""
+        from compile_helper import find_toolchain, compile_assembly_from_metadata, parse_assembly_metadata
+
+        tools = find_toolchain()
+        if tools.get("source") == "none":
+            self.skipTest("未找到可用的工具链")
+
+        import tempfile
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建省略 arch.ext 的有效 JSON 测试用例
+            # 根据 plan.md，只有 arch.name 和 arch.xlen 是必需的
+            json_data = {
+                "gen": [{
+                    "arch": {
+                        "name": "riscv",
+                        "xlen": "32"
+                        # 注意：省略 ext 字段
+                    },
+                    "test-ins": "add x1,x2,x3",
+                    "isa-state": {
+                        "x2": "32'b0000_0000_0010",
+                        "x3": "32'b0000_0000_0011"
+                    }
+                }]
+            }
+
+            # 生成汇编文件
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            self.assertEqual(len(generated_files), 1, "应该生成一个汇编文件")
+
+            generated_file = Path(generated_files[0])
+
+            # 验证汇编文件头部包含 ext=（空值）
+            asm_content = generated_file.read_text()
+            self.assertIn("xlen=32", asm_content,
+                         "汇编文件头部应包含 xlen=32")
+            self.assertIn("ext=", asm_content,
+                         "汇编文件头部应包含 ext=（空值）")
+
+            # 验证 parse_assembly_metadata 能正确解析空的 ext
+            config = parse_assembly_metadata(str(generated_file), strict=True)
+            self.assertEqual(config.xlen, 32)
+            self.assertEqual(config.raw_extensions, "")
+            # CompilerConfig 应该对空 ext 使用默认扩展
+            self.assertEqual(config.ordered_extensions, "imac")
+            self.assertEqual(config.march, "rv32imac")
+            self.assertEqual(config.mabi, "ilp32")
+
+            # 使用 --from-metadata 编译
+            output_prefix = str(generated_file.with_suffix(""))
+
+            result = compile_assembly_from_metadata(
+                str(generated_file),
+                output_prefix,
+                "linker.ld",
+                tools
+            )
+
+            # 验证编译成功（空 ext 应该使用默认扩展 imac）
+            self.assertTrue(result.success, f"省略 ext 的编译失败: {result.stderr}")
+
+            # 验证 ELF 文件生成
+            elf_file = Path(f"{output_prefix}.elf")
+            self.assertTrue(elf_file.exists(), f"ELF 文件未生成: {elf_file}")
+
+    def test_makefile_compile_all_rv64_metadata_driven(self):
+        """测试 Makefile compile-all 对 RV64 指令的元数据驱动编译（如果工具链可用）。"""
+        import subprocess
+        import tempfile
+        import json
+
+        # 检查工具链是否可用
+        try:
+            result = subprocess.run(
+                ["python3", "compile_helper.py", "--version"],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                self.skipTest("未找到可用的工具链")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            self.skipTest("未找到可用的工具链")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建 RV64 测试用例的 JSON 数据
+            rv64_json_data = {
+                "gen": [{
+                    "arch": {
+                        "name": "riscv",
+                        "xlen": "64",
+                        "pretty-name": "rv64makefiletest",
+                        "ext": "I"
+                    },
+                    "test-ins": "addw x1,x2,x3",
+                    "isa-state": {
+                        "x2": "64'h0000_0000_0000_0002",
+                        "x3": "64'h0000_0000_0000_0003"
+                    }
+                }]
+            }
+
+            # 生成汇编文件到临时目录
+            generated_files = process_test_cases(
+                rv64_json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            self.assertEqual(len(generated_files), 1, "应该生成一个汇编文件")
+
+            # 执行 make compile-all
+            make_result = subprocess.run(
+                ["make", "compile-all", f"OUTPUT_DIR={tmpdir}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=Path.cwd()
+            )
+
+            # 验证 make 命令成功
+            self.assertEqual(make_result.returncode, 0,
+                           f"make compile-all 失败: {make_result.stderr}")
+
+            # 验证生成的 ELF 文件存在
+            # 文件名应该是 template_rv64makefiletest_addw_x1_x2_x3.elf
+            elf_files = list(Path(tmpdir).glob("*.elf"))
+            self.assertTrue(len(elf_files) > 0, f"未找到 ELF 文件在 {tmpdir}")
+
+            # 验证 ELF 文件名包含预期内容
+            elf_file = elf_files[0]
+            self.assertIn("rv64makefiletest", elf_file.name.lower(),
+                         f"ELF 文件名应包含 'rv64makefiletest': {elf_file.name}")
+
 
 def run_tests():
     """运行所有测试。"""
