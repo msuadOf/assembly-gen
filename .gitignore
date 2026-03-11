@@ -11,6 +11,7 @@ ENV/
 # RLCR loop state files
 docs/plan.md
 *.loop-state
+.humanize/
 goal-tracker.md
 summary.md
 
