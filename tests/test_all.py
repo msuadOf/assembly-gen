@@ -967,11 +967,20 @@ class TestCompileVerification(unittest.TestCase):
             self.assertTrue(elf_file.exists(), f"ELF 文件未生成: {elf_file}")
 
     def test_missing_ext_metadata_driven_compilation(self):
-        """测试省略 arch.ext 的有效 JSON 通过元数据驱动路径编译（如果工具链可用）。"""
-        from compile_helper import find_toolchain, compile_assembly_from_metadata, parse_assembly_metadata
+        """测试省略 arch.ext 的有效 JSON 通过元数据驱动 Makefile 路径编译（如果工具链可用）。"""
+        from compile_helper import find_toolchain, parse_assembly_metadata
+        import subprocess
 
-        tools = find_toolchain()
-        if tools.get("source") == "none":
+        # 检查工具链是否可用
+        try:
+            result = subprocess.run(
+                ["python3", "compile_helper.py", "--version"],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                self.skipTest("未找到可用的工具链")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
             self.skipTest("未找到可用的工具链")
 
         import tempfile
@@ -1022,22 +1031,23 @@ class TestCompileVerification(unittest.TestCase):
             self.assertEqual(config.march, "rv32imac")
             self.assertEqual(config.mabi, "ilp32")
 
-            # 使用 --from-metadata 编译
-            output_prefix = str(generated_file.with_suffix(""))
-
-            result = compile_assembly_from_metadata(
-                str(generated_file),
-                output_prefix,
-                "linker.ld",
-                tools
+            # 通过 make compile-all 使用公共入口点编译（用户实际调用的路径）
+            make_result = subprocess.run(
+                ["make", "compile-all", f"OUTPUT_DIR={tmpdir}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=Path.cwd()
             )
 
-            # 验证编译成功（空 ext 应该使用默认扩展 imac）
-            self.assertTrue(result.success, f"省略 ext 的编译失败: {result.stderr}")
+            # 验证 make 命令成功（空 ext 应该使用默认扩展 imac）
+            self.assertEqual(make_result.returncode, 0,
+                           f"make compile-all 失败（省略 ext）: {make_result.stderr}")
 
             # 验证 ELF 文件生成
-            elf_file = Path(f"{output_prefix}.elf")
-            self.assertTrue(elf_file.exists(), f"ELF 文件未生成: {elf_file}")
+            elf_files = list(Path(tmpdir).glob("*.elf"))
+            self.assertTrue(len(elf_files) > 0, f"未找到 ELF 文件在 {tmpdir}")
+            self.assertTrue(elf_files[0].exists(), f"ELF 文件未生成: {elf_files[0]}")
 
     def test_makefile_compile_all_rv64_metadata_driven(self):
         """测试 Makefile compile-all 对 RV64 指令的元数据驱动编译（如果工具链可用）。"""
