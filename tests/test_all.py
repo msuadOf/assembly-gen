@@ -1015,20 +1015,20 @@ class TestCompileVerification(unittest.TestCase):
 
             generated_file = Path(generated_files[0])
 
-            # 验证汇编文件头部包含 ext=（空值）
+            # 验证汇编文件头部包含 zicsr 扩展（模板使用 CSR 指令）
             asm_content = generated_file.read_text()
             self.assertIn("xlen=32", asm_content,
                          "汇编文件头部应包含 xlen=32")
-            self.assertIn("ext=", asm_content,
-                         "汇编文件头部应包含 ext=（空值）")
+            self.assertIn("ext=zicsr", asm_content,
+                         "汇编文件头部应包含 ext=zicsr（模板使用 CSR 指令）")
 
-            # 验证 parse_assembly_metadata 能正确解析空的 ext
+            # 验证 parse_assembly_metadata 能正确解析 zicsr 扩展
             config = parse_assembly_metadata(str(generated_file), strict=True)
             self.assertEqual(config.xlen, 32)
-            self.assertEqual(config.raw_extensions, "")
-            # CompilerConfig 应该对空 ext 使用默认扩展
-            self.assertEqual(config.ordered_extensions, "imac")
-            self.assertEqual(config.march, "rv32imac")
+            self.assertEqual(config.raw_extensions, "zicsr")
+            # zicsr 是多字母扩展，ordered_extensions 会保持其完整性
+            self.assertIn("zicsr", config.ordered_extensions)
+            self.assertIn("i", config.ordered_extensions)  # 基础 I 扩展由 CompilerConfig 添加
             self.assertEqual(config.mabi, "ilp32")
 
             # 通过 make compile-all 使用公共入口点编译（用户实际调用的路径）

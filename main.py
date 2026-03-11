@@ -406,7 +406,20 @@ class RISCV(GenericTarget):
         result = result.replace("${test_ins}", self.test_ins)
         result = result.replace("${pretty_name}", pretty_name)
         result = result.replace("${xlen}", str(self.xlen))
-        result = result.replace("${ext}", self.ext)
+
+        # 构建用于元数据头部的扩展字符串
+        # 模板使用 CSR 指令（csrw mstatus, csrw mepc），现代工具链需要 zicsr 扩展
+        display_ext = self.ext
+        if display_ext:
+            # 检查是否已包含 zicsr（不区分大小写）
+            ext_lower = display_ext.lower()
+            if "zicsr" not in ext_lower:
+                # 添加 zicsr 扩展（模板使用 CSR 指令）
+                display_ext = display_ext + "zicsr"
+        else:
+            # 空扩展时，添加 zicsr
+            display_ext = "zicsr"
+        result = result.replace("${ext}", display_ext)
 
         # 第四步：检测残留的占位符或格式错误的占位符
         import re as re_module

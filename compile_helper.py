@@ -48,30 +48,59 @@ class CompilerConfig:
 
     @property
     def ordered_extensions(self) -> str:
-        """返回按标准顺序排序的扩展字符串。"""
+        """返回按标准顺序排序的扩展字符串。
+
+        处理标准单字母扩展（i, m, a, f, d, c）和多字母扩展（如 zicsr, zifencei）。
+        多字母扩展以 'z' 开头，必须保持完整。
+        """
         if not self.raw_extensions:
             return "imac"  # 默认扩展
 
-        # 转为小写并去重
+        # 转为小写
         exts = self.raw_extensions.lower()
 
-        # 确保基本扩展存在
-        if 'i' not in exts and 'e' not in exts:
-            exts = 'i' + exts
+        # 解析扩展：分离单字母扩展和多字母扩展（z 开头）
+        parsed = []
+        i = 0
+        while i < len(exts):
+            if exts[i] == 'z' and i + 1 < len(exts) and exts[i+1].isalpha():
+                # z 开头且后面还有字母，解析多字母扩展
+                j = i
+                while j < len(exts) and exts[j].isalpha():
+                    j += 1
+                # z 开头的多字母扩展至少需要 2 个字符
+                parsed.append(exts[i:j])
+                i = j
+            else:
+                # 单字母扩展
+                parsed.append(exts[i])
+                i += 1
 
-        # 按标准顺序排序
+        # 确保基本扩展存在
+        single_letters = ''.join([e for e in parsed if len(e) == 1])
+        if 'i' not in single_letters and 'e' not in single_letters:
+            parsed.insert(0, 'i')
+            single_letters += 'i'
+
+        # 按标准顺序排序单字母扩展
         ordered = []
         added = set()
         for e in self.EXTENSION_ORDER:
-            if e in exts and e not in added:
+            if e in single_letters and e not in added:
                 ordered.append(e)
                 added.add(e)
 
-        # 添加任何不在标准列表中的扩展
-        for e in exts:
+        # 添加不在标准列表中的单字母扩展
+        for e in single_letters:
             if e not in added:
                 ordered.append(e)
                 added.add(e)
+
+        # 添加多字母扩展（保持原始顺序，放在单字母扩展之后）
+        for ext in parsed:
+            if len(ext) > 1 and ext not in added:
+                ordered.append(ext)
+                added.add(ext)
 
         return ''.join(ordered)
 
@@ -114,6 +143,35 @@ def find_toolchain() -> Dict[str, str]:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
 
+    # 检查是否为 RISC-V gcc（排除原生 gcc）
+    def check_riscv_gcc(name: str) -> Optional[str]:
+        """检查是否为 RISC-V gcc，并测试其是否能处理 RISC-V 选项。"""
+        try:
+            # 首先检查是否为 gcc
+            result = subprocess.run(
+                [name, "--version"],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode != 0:
+                return None
+
+            # 检查是否包含 riscv 标识
+            if "riscv" not in result.stdout.lower() and "riscv" not in result.stderr.lower():
+                return None
+
+            # 验证能处理 RISC-V 选项（尝试编译空程序）
+            test_result = subprocess.run(
+                [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
+                capture_output=True,
+                timeout=5
+            )
+            # 如果成功或只输出警告而非错误，则认为是有效的 RISC-V gcc
+            if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
+                return name
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+
     tools = {}
     has_env_override = False
 
@@ -131,8 +189,8 @@ def find_toolchain() -> Dict[str, str]:
         if env_gcc:
             tools["gcc"] = env_gcc
         else:
-            # 尝试自动检测 gcc
-            tools["gcc"] = check_tool("riscv-gcc") or check_tool("riscv32-unknown-elf-gcc") or check_tool("riscv64-unknown-elf-gcc") or check_tool("gcc")
+            # 尝试自动检测 RISC-V gcc（避免原生 gcc）
+            tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
 
         # 设置 objcopy（使用环境变量或自动检测）
         if env_objcopy:
@@ -599,6 +657,16 @@ if __name__ == "__main__":
         print(f"HEX: {hex_result}")
         print(f"BIN: {bin_result}")
         print(f"DUMP: {dump_result}")
+
+        # 如果任何格式转换失败，返回错误
+        if not hex_result.success or not bin_result.success or not dump_result.success:
+            if not hex_result.success:
+                print(f"错误: HEX 转换失败: {hex_result.stderr}")
+            if not bin_result.success:
+                print(f"错误: BIN 转换失败: {bin_result.stderr}")
+            if not dump_result.success:
+                print(f"错误: DUMP 生成失败: {dump_result.stderr}")
+            sys.exit(1)
 
         # 返回码基于 ELF 编译结果
         sys.exit(0)
