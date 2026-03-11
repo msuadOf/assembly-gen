@@ -1,0 +1,20 @@
+{
+	"gen":[
+		{
+			"arch": {
+				"pretty-name": "rv32d",
+				"name": "riscv",
+				"xlen": "32",
+				"ext": "IMACFD"
+			},
+			"test-ins": "add x1,x1,x1",
+			"isa-state": {
+				"x1": "32'b00_01",
+				"csrs": {
+					"mstatus": "32'b0011_00xx_0000_0101",
+					"mepc": "32'h80000000"
+				}
+			}
+		}
+	]
+}
