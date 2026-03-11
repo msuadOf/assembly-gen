@@ -38,15 +38,16 @@ _start:
     li x28, ${x28}
     li x29, ${x29}
     li x30, ${x30}
-    li x31, ${x31}
+    # x31 (t6) 用作 CSR 初始化的临时寄存器，不初始化用户值
+    # li x31, ${x31}
 
     # === CSR 初始化 ===
-    # 使用临时寄存器 t0 (x5) 设置 CSR
-    li t0, ${mstatus}
-    csrw mstatus, t0
+    # 使用 x31 (t6) 作为临时寄存器设置 CSR，避免覆盖用户设置的 x5 (t0)
+    li t6, ${mstatus}
+    csrw mstatus, t6
 
-    li t0, ${mepc}
-    csrw mepc, t0
+    li t6, ${mepc}
+    csrw mepc, t6
 
     # === 测试指令 ===
     ${test_ins}

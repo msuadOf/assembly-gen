@@ -100,28 +100,7 @@ def find_toolchain() -> Dict[str, str]:
     Returns:
         工具链命令字典，包含 'gcc', 'objcopy', 'objdump'
     """
-    tools = {}
-
-    # 最高优先级：检查环境变量
-    env_gcc = os.environ.get("ASSEMBLY_GEN_GCC")
-    env_objcopy = os.environ.get("ASSEMBLY_GEN_OBJCOPY")
-    env_objdump = os.environ.get("ASSEMBLY_GEN_OBJDUMP")
-
-    if env_gcc and env_objcopy and env_objdump:
-        tools["gcc"] = env_gcc
-        tools["objcopy"] = env_objcopy
-        tools["objdump"] = env_objdump
-
-        # 检测环境变量指定的 gcc 是否实际上是 clang
-        # 如果是 clang，需要使用 LLVM 编译路径
-        gcc_basename = os.path.basename(env_gcc)
-        if "clang" in gcc_basename or gcc_basename == "clang":
-            tools["source"] = "llvm"
-        else:
-            tools["source"] = "gnu"
-        return tools
-
-    # 检查 RISC-V GNU 工具链
+    # 检查工具是否可用
     def check_tool(name: str) -> Optional[str]:
         """检查工具是否可用。"""
         try:
@@ -135,6 +114,55 @@ def find_toolchain() -> Dict[str, str]:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
 
+    tools = {}
+    has_env_override = False
+
+    # 最高优先级：检查环境变量（独立覆盖）
+    # 用户可以只设置部分环境变量，其他工具自动检测
+    env_gcc = os.environ.get("ASSEMBLY_GEN_GCC")
+    env_objcopy = os.environ.get("ASSEMBLY_GEN_OBJCOPY")
+    env_objdump = os.environ.get("ASSEMBLY_GEN_OBJDUMP")
+
+    # 如果设置了任何环境变量，标记为有覆盖
+    if env_gcc or env_objcopy or env_objdump:
+        has_env_override = True
+
+        # 设置 GCC（使用环境变量或自动检测）
+        if env_gcc:
+            tools["gcc"] = env_gcc
+        else:
+            # 尝试自动检测 gcc
+            tools["gcc"] = check_tool("riscv-gcc") or check_tool("riscv32-unknown-elf-gcc") or check_tool("riscv64-unknown-elf-gcc") or check_tool("gcc")
+
+        # 设置 objcopy（使用环境变量或自动检测）
+        if env_objcopy:
+            tools["objcopy"] = env_objcopy
+        else:
+            tools["objcopy"] = check_tool("riscv-objcopy") or check_tool("riscv32-unknown-elf-objcopy") or check_tool("riscv64-unknown-elf-objcopy") or check_tool("llvm-objcopy") or check_tool("objcopy")
+
+        # 设置 objdump（使用环境变量或自动检测）
+        if env_objdump:
+            tools["objdump"] = env_objdump
+        else:
+            tools["objdump"] = check_tool("riscv-objdump") or check_tool("riscv32-unknown-elf-objdump") or check_tool("riscv64-unknown-elf-objdump") or check_tool("llvm-objdump") or check_tool("objdump")
+
+        # 检测是否为 LLVM 工具链
+        gcc_basename = os.path.basename(tools.get("gcc", ""))
+        if "clang" in gcc_basename or gcc_basename == "clang":
+            tools["source"] = "llvm"
+        else:
+            tools["source"] = "gnu"
+
+        # 验证所有必需工具都已找到
+        if not all(tools.get(k) for k in ["gcc", "objcopy", "objdump"]):
+            # 环境覆盖不完整，回退到自动检测
+            has_env_override = False
+            tools = {}
+
+    if has_env_override:
+        return tools
+
+    # 自动检测工具链（无环境变量覆盖或覆盖不完整）
     # 优先检查多架构工具链
     riscv_gcc = check_tool("riscv-gcc")
     riscv_objcopy = check_tool("riscv-objcopy")
@@ -543,16 +571,37 @@ if __name__ == "__main__":
 
     # 编译
     if args.from_metadata:
-        # 从汇编文件解析元数据
+        # 从汇编文件解析元数据并编译为 ELF
         print("从汇编文件解析元数据...")
-        result = compile_assembly_from_metadata(
+        elf_result = compile_assembly_from_metadata(
             args.assembly,
             args.output,
             args.linker,
             tools
         )
-        print(f"{result}")
-        sys.exit(0 if result.success else 1)
+
+        if not elf_result.success:
+            print(f"编译失败: {elf_result.stderr}")
+            sys.exit(1)
+
+        # 转换为 HEX/BIN/DUMP 格式（保留与完整流程相同的输出）
+        elf_file = f"{args.output}.elf"
+        hex_result, bin_result, dump_result = convert_elf(
+            elf_file,
+            f"{args.output}.hex",
+            f"{args.output}.bin",
+            f"{args.output}.dump",
+            tools
+        )
+
+        # 打印结果
+        print(f"ELF: {elf_result}")
+        print(f"HEX: {hex_result}")
+        print(f"BIN: {bin_result}")
+        print(f"DUMP: {dump_result}")
+
+        # 返回码基于 ELF 编译结果
+        sys.exit(0)
     else:
         # 使用手动指定的参数
         config = CompilerConfig(args.xlen, args.extensions)
