@@ -93,7 +93,7 @@ def find_toolchain() -> Dict[str, str]:
     查找可用的工具链。
 
     优先级：
-    1. 环境变量指定的工具
+    1. 环境变量指定的工具（最高优先级）
     2. RISC-V GNU 工具链 (riscv-gcc)
     3. LLVM/clang 工具链 (clang --target=riscv{32,64})
 
@@ -102,7 +102,7 @@ def find_toolchain() -> Dict[str, str]:
     """
     tools = {}
 
-    # 检查环境变量
+    # 最高优先级：检查环境变量
     env_gcc = os.environ.get("ASSEMBLY_GEN_GCC")
     env_objcopy = os.environ.get("ASSEMBLY_GEN_OBJCOPY")
     env_objdump = os.environ.get("ASSEMBLY_GEN_OBJDUMP")
@@ -111,7 +111,14 @@ def find_toolchain() -> Dict[str, str]:
         tools["gcc"] = env_gcc
         tools["objcopy"] = env_objcopy
         tools["objdump"] = env_objdump
-        tools["source"] = "environment"
+
+        # 检测环境变量指定的 gcc 是否实际上是 clang
+        # 如果是 clang，需要使用 LLVM 编译路径
+        gcc_basename = os.path.basename(env_gcc)
+        if "clang" in gcc_basename or gcc_basename == "clang":
+            tools["source"] = "llvm"
+        else:
+            tools["source"] = "gnu"
         return tools
 
     # 检查 RISC-V GNU 工具链
@@ -354,6 +361,91 @@ def convert_elf(
     return hex_result, bin_result, dump_result
 
 
+def parse_assembly_metadata(assembly_file: str) -> CompilerConfig:
+    """
+    从生成的汇编文件头部解析架构元数据。
+
+    汇编文件头部应包含如下格式的注释：
+    # 架构: RISC-V (xlen=32, ext=IMACFD)
+
+    Args:
+        assembly_file: 汇编文件路径
+
+    Returns:
+        CompilerConfig 对象
+
+    Raises:
+        ValueError: 如果无法解析元数据
+        FileNotFoundError: 如果文件不存在
+    """
+    import re
+
+    try:
+        with open(assembly_file, 'r', encoding='utf-8') as f:
+            # 只读取前 20 行，寻找元数据
+            for i, line in enumerate(f):
+                if i >= 20:
+                    break
+
+                # 查找 "架构: RISC-V (xlen=..., ext=...)" 模式
+                match = re.search(r'架构:\s*RISC-V\s*\(\s*xlen=(\d+)\s*,\s*ext=([^\)]+)\s*\)', line)
+                if match:
+                    xlen = int(match.group(1))
+                    ext = match.group(2).strip()
+                    return CompilerConfig(xlen, ext)
+    except FileNotFoundError:
+        raise
+    except Exception as e:
+        raise ValueError(f"无法从 {assembly_file} 解析架构元数据: {e}")
+
+    # 如果未找到元数据，尝试从文件名推断（向后兼容）
+    import os
+    basename = os.path.basename(assembly_file)
+
+    # 从文件名推断 xlen
+    if 'rv64' in basename or '64d' in basename:
+        xlen = 64
+    else:
+        xlen = 32
+
+    # 使用默认扩展集
+    ext = "IMACFD"
+
+    return CompilerConfig(xlen, ext)
+
+
+def compile_assembly_from_metadata(
+    assembly_file: str,
+    output_prefix: str,
+    linker_script: Optional[str] = None,
+    tools: Optional[Dict[str, str]] = None
+) -> CompileResult:
+    """
+    从汇编文件读取元数据并编译。
+
+    Args:
+        assembly_file: 汇编文件路径
+        output_prefix: 输出文件前缀（不含扩展名）
+        linker_script: 链接器脚本路径 (可选)
+        tools: 工具链命令字典 (可选，自动检测)
+
+    Returns:
+        编译结果
+    """
+    # 从汇编文件解析元数据
+    config = parse_assembly_metadata(assembly_file)
+
+    # 编译为 ELF
+    elf_file = f"{output_prefix}.elf"
+    return compile_assembly(
+        assembly_file,
+        elf_file,
+        config,
+        linker_script,
+        tools
+    )
+
+
 def compile_full_pipeline(
     assembly_file: str,
     output_prefix: str,
@@ -411,6 +503,7 @@ if __name__ == "__main__":
     parser.add_argument("-x", "--xlen", type=int, default=32, choices=[32, 64], help="位宽")
     parser.add_argument("-e", "--extensions", default="", help="扩展集")
     parser.add_argument("-T", "--linker", help="链接器脚本")
+    parser.add_argument("--from-metadata", action="store_true", help="从汇编文件头部解析 xlen 和扩展集")
     parser.add_argument("--version", action="store_true", help="显示版本信息并退出")
 
     args = parser.parse_args()
@@ -439,20 +532,33 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # 编译
-    config = CompilerConfig(args.xlen, args.extensions)
-    print(f"编译配置: -march={config.march} -mabi={config.mabi}")
+    if args.from_metadata:
+        # 从汇编文件解析元数据
+        print("从汇编文件解析元数据...")
+        result = compile_assembly_from_metadata(
+            args.assembly,
+            args.output,
+            args.linker,
+            tools
+        )
+        print(f"{result}")
+        sys.exit(0 if result.success else 1)
+    else:
+        # 使用手动指定的参数
+        config = CompilerConfig(args.xlen, args.extensions)
+        print(f"编译配置: -march={config.march} -mabi={config.mabi}")
 
-    results = compile_full_pipeline(
-        args.assembly,
-        args.output,
-        config,
-        args.linker,
-        tools
-    )
+        results = compile_full_pipeline(
+            args.assembly,
+            args.output,
+            config,
+            args.linker,
+            tools
+        )
 
-    # 打印结果
-    for stage, result in results.items():
-        print(f"{stage.upper()}: {result}")
+        # 打印结果
+        for stage, result in results.items():
+            print(f"{stage.upper()}: {result}")
 
-    # 返回码
-    sys.exit(0 if results["elf"].success else 1)
+        # 返回码
+        sys.exit(0 if results["elf"].success else 1)

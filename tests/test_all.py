@@ -664,6 +664,60 @@ class TestCompileVerification(unittest.TestCase):
             self.assertTrue(result.success, f"LLVM 编译失败: {result.stderr}")
             self.assertTrue(elf_file.exists())
 
+    def test_environment_variable_override(self):
+        """测试环境变量覆盖工具链检测（如果 clang 可用）。"""
+        from compile_helper import find_toolchain
+
+        # 检查 clang, llvm-objcopy, llvm-objdump 是否都可用
+        try:
+            subprocess.run(["clang", "--version"], capture_output=True, timeout=5)
+            subprocess.run(["llvm-objcopy", "--version"], capture_output=True, timeout=5)
+            subprocess.run(["llvm-objdump", "--version"], capture_output=True, timeout=5)
+            llvm_available = True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            llvm_available = False
+
+        if not llvm_available:
+            self.skipTest("clang/llvm 工具链不可用")
+
+        # 保存当前环境变量（如果存在）
+        saved_gcc = os.environ.get("ASSEMBLY_GEN_GCC")
+        saved_objcopy = os.environ.get("ASSEMBLY_GEN_OBJCOPY")
+        saved_objdump = os.environ.get("ASSEMBLY_GEN_OBJDUMP")
+
+        try:
+            # 设置环境变量强制使用 clang
+            os.environ["ASSEMBLY_GEN_GCC"] = "clang"
+            os.environ["ASSEMBLY_GEN_OBJCOPY"] = "llvm-objcopy"
+            os.environ["ASSEMBLY_GEN_OBJDUMP"] = "llvm-objdump"
+
+            # 调用 find_toolchain
+            tools = find_toolchain()
+
+            # 验证返回的是 LLVM 工具链
+            self.assertEqual(tools["source"], "llvm",
+                           f"环境变量应该强制使用 LLVM，但得到: {tools['source']}")
+            self.assertEqual(tools["gcc"], "clang")
+            self.assertEqual(tools["objcopy"], "llvm-objcopy")
+            self.assertEqual(tools["objdump"], "llvm-objdump")
+
+        finally:
+            # 恢复原始环境变量
+            if saved_gcc is not None:
+                os.environ["ASSEMBLY_GEN_GCC"] = saved_gcc
+            elif "ASSEMBLY_GEN_GCC" in os.environ:
+                del os.environ["ASSEMBLY_GEN_GCC"]
+
+            if saved_objcopy is not None:
+                os.environ["ASSEMBLY_GEN_OBJCOPY"] = saved_objcopy
+            elif "ASSEMBLY_GEN_OBJCOPY" in os.environ:
+                del os.environ["ASSEMBLY_GEN_OBJCOPY"]
+
+            if saved_objdump is not None:
+                os.environ["ASSEMBLY_GEN_OBJDUMP"] = saved_objdump
+            elif "ASSEMBLY_GEN_OBJDUMP" in os.environ:
+                del os.environ["ASSEMBLY_GEN_OBJDUMP"]
+
 
 def run_tests():
     """运行所有测试。"""

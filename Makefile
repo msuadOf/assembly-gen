@@ -21,9 +21,9 @@ help:
 	@echo "可用目标:"
 	@echo "  make run           - 生成所有汇编文件并编译"
 	@echo "  make gen           - 生成所有汇编文件"
-	@echo "  make compile-all   - 编译所有生成的汇编文件"
+	@echo "  make compile-all   - 编译所有生成的汇编文件（使用文件元数据）"
 	@echo "  make compile-add   - 生成并编译 add 指令的测试用例"
-	@echo "  make compile FILE=target/template_xxx.S - 编译单个文件"
+	@echo "  make compile FILE=target/template_xxx.S - 编译单个文件（使用文件元数据）"
 	@echo "  make clean         - 清理生成的文件"
 	@echo "  make test          - 运行所有测试"
 	@echo "  make help          - 显示此帮助信息"
@@ -66,11 +66,11 @@ compile-add:
 	@mkdir -p $(OUTPUT_DIR)
 	@$(PYTHON) $(MAIN_SCRIPT) --template $(DEFAULT_TEMPLATE) $(DEFAULT_JSON) --output_dir $(OUTPUT_DIR) >/dev/null 2>&1 || \
 		(echo "错误: 生成汇编文件失败" >&2; exit 1)
-	@$(MAKE) --no-print-directory compile-single FILE=$(OUTPUT_DIR)/template_rv32d_add_x1_x1_x1.S XLEN=32
+	@$(MAKE) --no-print-directory compile-from-metadata FILE=$(OUTPUT_DIR)/template_rv32d_add_x1_x1_x1.S
 
-# 编译单个汇编文件
-.PHONY: compile-single
-compile-single: check-tools
+# 编译单个汇编文件（从文件元数据读取配置）
+.PHONY: compile-from-metadata
+compile-from-metadata: check-tools
 	@if [ -z "$(FILE)" ]; then \
 		echo "错误: 请指定 FILE 参数" >&2; \
 		exit 1; \
@@ -79,65 +79,37 @@ compile-single: check-tools
 		echo "错误: 文件不存在: $(FILE)" >&2; \
 		exit 1; \
 	fi
-	@echo "编译 $(FILE)..."
+	@echo "编译 $(FILE)（从文件元数据读取 xlen 和 ext）..."
 	@BASENAME=$$(basename $(FILE) .S); \
-	XLEN=$${XLEN:-32}; \
-	$(PYTHON) $(COMPILE_HELPER) "$(FILE)" -o "$(OUTPUT_DIR)/$$BASENAME" -x $$XLEN -e IMACFD -T $(LINKER_SCRIPT); \
+	$(PYTHON) $(COMPILE_HELPER) "$(FILE)" --from-metadata -o "$(OUTPUT_DIR)/$$BASENAME" -T $(LINKER_SCRIPT); \
 	if [ $$? -eq 0 ]; then \
 		echo "编译成功: $$BASENAME"; \
 	else \
 		echo "编译失败: $$BASENAME" >&2; \
 		exit 1; \
 	fi
+
+# 编译单个汇编文件（内部实现，向后兼容）
+.PHONY: compile-single
+compile-single: compile-from-metadata
 
 # 编译单个汇编文件（用户调用接口）
 .PHONY: compile
-compile: check-tools
-	@if [ -z "$(FILE)" ]; then \
-		echo "错误: 请指定 FILE 参数，如: make compile FILE=target/template_xxx.S" >&2; \
-		exit 1; \
-	fi
-	@if [ ! -f "$(FILE)" ]; then \
-		echo "错误: 文件不存在: $(FILE)" >&2; \
-		exit 1; \
-	fi
-	@echo "编译 $(FILE)..."
-	@BASENAME=$$(basename $(FILE) .S); \
-	FILENAME=$$(basename "$(FILE)"); \
-	case "$$FILENAME" in \
-		*rv32*|*32d*) XLEN=32 ;; \
-		*rv64*|*64d*) XLEN=64 ;; \
-		*) XLEN=32 ;; \
-	esac; \
-	$(PYTHON) $(COMPILE_HELPER) "$(FILE)" -o "$(OUTPUT_DIR)/$$BASENAME" -x $$XLEN -e IMACFD -T $(LINKER_SCRIPT); \
-	if [ $$? -eq 0 ]; then \
-		echo "编译成功: $$BASENAME"; \
-	else \
-		echo "编译失败: $$BASENAME" >&2; \
-		exit 1; \
-	fi
+compile: compile-from-metadata
 
-# 编译所有生成的汇编文件
+# 编译所有生成的汇编文件（使用文件元数据）
 .PHONY: compile-all
 compile-all: check-tools
-	@echo "编译所有生成的汇编文件..."
+	@echo "编译所有生成的汇编文件（从文件元数据读取配置）..."
 	@FOUND=0; \
 	FAILED=0; \
 	for file in $(OUTPUT_DIR)/template_*.S; do \
 		if [ -f "$$file" ]; then \
 			FOUND=1; \
 			BASENAME=$$(basename "$$file" .S); \
-			FILENAME=$$(basename "$$file"); \
-			\
-			# 从文件名推断 xlen \
-			case "$$FILENAME" in \
-				*rv32*|*32d*) XLEN=32 ;; \
-				*rv64*|*64d*) XLEN=64 ;; \
-				*) XLEN=32 ;; \
-			esac; \
 			\
 			echo "编译 $$file..."; \
-			$(PYTHON) $(COMPILE_HELPER) "$$file" -o "$(OUTPUT_DIR)/$$BASENAME" -x $$XLEN -e IMACFD -T $(LINKER_SCRIPT); \
+			$(PYTHON) $(COMPILE_HELPER) "$$file" --from-metadata -o "$(OUTPUT_DIR)/$$BASENAME" -T $(LINKER_SCRIPT); \
 			if [ $$? -ne 0 ]; then \
 				echo "错误: 编译失败: $$BASENAME" >&2; \
 				FAILED=1; \
@@ -160,7 +132,7 @@ run:
 	@mkdir -p $(OUTPUT_DIR)
 	@$(PYTHON) $(MAIN_SCRIPT) --template $(DEFAULT_TEMPLATE) $(DEFAULT_JSON) --output_dir $(OUTPUT_DIR)
 	@echo ""
-	@echo "编译汇编文件..."
+	@echo "编译汇编文件（从文件元数据读取配置）..."
 	@$(MAKE) --no-print-directory compile-all
 	@if [ $$? -eq 0 ]; then \
 		echo ""; \
