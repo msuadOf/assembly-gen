@@ -17,7 +17,8 @@ from main import (
     generate_output_filename,
     sanitize_filename,
     load_json_spec,
-    validate_json_spec
+    validate_json_spec,
+    process_test_cases
 )
 
 
@@ -133,8 +134,22 @@ class TestJSONParsing(unittest.TestCase):
         self.assertIn("arch", str(context.exception))
 
     def test_validate_invalid_xlen(self):
-        """测试无效的 xlen 值。"""
-        json_data = {
+        """测试无效的 xlen 值和精确的错误诊断。"""
+        # 测试 1: 非数字 xlen 应该报"必须是数字"
+        json_data_non_numeric = {
+            "gen": [{
+                "arch": {"name": "riscv", "xlen": "abc"},
+                "test-ins": "add x1,x1,x1",
+                "isa-state": {}
+            }]
+        }
+        with self.assertRaises(ValueError) as context:
+            validate_json_spec(json_data_non_numeric)
+        self.assertIn("必须是数字", str(context.exception))
+        self.assertIn("abc", str(context.exception))
+
+        # 测试 2: 数字但无效范围的 xlen 应该报"必须是 32 或 64"
+        json_data_invalid_range = {
             "gen": [{
                 "arch": {"name": "riscv", "xlen": "16"},
                 "test-ins": "add x1,x1,x1",
@@ -142,8 +157,9 @@ class TestJSONParsing(unittest.TestCase):
             }]
         }
         with self.assertRaises(ValueError) as context:
-            validate_json_spec(json_data)
-        self.assertIn("xlen", str(context.exception))
+            validate_json_spec(json_data_invalid_range)
+        self.assertIn("必须是 32 或 64", str(context.exception))
+        self.assertIn("16", str(context.exception))
 
     def test_nonexistent_file(self):
         """测试加载不存在的文件。"""
@@ -246,6 +262,32 @@ class TestNegativeCases(unittest.TestCase):
         self.assertTrue(v.has_unknown_bits())
         self.assertEqual(v.mask, 0b11110011)  # x 位不在 mask 中
         self.assertEqual(v.value, 0b10100000)  # x 替换为 0
+
+    def test_value_short_literal_no_unknown_bits(self):
+        """测试短字面量零扩展后没有未知位。"""
+        # 二进制短字面量：8'b101 表示 00000101，没有未知位
+        v1 = Value("8'b101")
+        self.assertFalse(v1.has_unknown_bits(),
+                        f"Value('8\\'b101') 不应有未知位，但 mask={v1.mask:08b}")
+        # 验证高位为已知 0
+        self.assertEqual(v1.to_num(), 0b101)  # 5
+
+        # 十六进制短字面量：8'hF 表示 00001111，没有未知位
+        v2 = Value("8'hF")
+        self.assertFalse(v2.has_unknown_bits(),
+                        f"Value('8\\'hF') 不应有未知位，但 mask={v2.mask:08b}")
+        # 验证高位为已知 0
+        self.assertEqual(v2.to_num(), 0xF)  # 15
+
+        # 更长的位宽，短字面量
+        v3 = Value("32'b101")
+        self.assertFalse(v3.has_unknown_bits(),
+                        f"Value('32\\'b101') 不应有未知位，但 mask={v3.mask:032b}")
+        self.assertEqual(v3.to_num(), 0b101)  # 5
+
+        v4 = Value("64'hFF")
+        self.assertFalse(v4.has_unknown_bits(),
+                        f"Value('64\\'hFF') 不应有未知位")
 
     def test_value_to_bin_and_to_dec_methods(self):
         """测试 to_bin() 和 to_dec() 方法。"""
@@ -568,18 +610,20 @@ class TestCompileVerification(unittest.TestCase):
 
         # 创建一个临时目录，其中包含一个坏汇编文件
         with tempfile.TemporaryDirectory() as tmpdir:
-            # 创建坏的汇编文件
+            # 创建坏的汇编文件（带元数据头部）
             bad_asm = Path(tmpdir) / "template_bad.S"
             bad_asm.write_text(
+                "# 架构: RISC-V (xlen=32, ext=IMACFD)\n"
                 ".section .text\n"
                 ".globl _start\n"
                 "_start:\n"
                 "    invalid_instruction_xyz  # 无效指令\n"
             )
 
-            # 创建好的汇编文件
+            # 创建好的汇编文件（带元数据头部）
             good_asm = Path(tmpdir) / "template_ok.S"
             good_asm.write_text(
+                "# 架构: RISC-V (xlen=32, ext=IMACFD)\n"
                 ".section .text\n"
                 ".globl _start\n"
                 "_start:\n"
@@ -717,6 +761,210 @@ class TestCompileVerification(unittest.TestCase):
                 os.environ["ASSEMBLY_GEN_OBJDUMP"] = saved_objdump
             elif "ASSEMBLY_GEN_OBJDUMP" in os.environ:
                 del os.environ["ASSEMBLY_GEN_OBJDUMP"]
+
+    def test_elf_conversion_outputs(self):
+        """测试 ELF 转换为 HEX/BIN/DUMP 格式（如果工具链可用）。"""
+        from compile_helper import find_toolchain, CompilerConfig, compile_assembly, convert_elf
+
+        tools = find_toolchain()
+        if tools.get("source") == "none":
+            self.skipTest("未找到可用的工具链")
+
+        import tempfile
+        from main import process_test_cases, load_json_spec
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 生成汇编文件
+            json_data = load_json_spec("resource/example.json")
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            # 编译为 ELF
+            config = CompilerConfig(32, "IMACFD")
+            elf_file = Path(tmpdir) / "test_convert.elf"
+
+            result = compile_assembly(
+                generated_files[0],
+                str(elf_file),
+                config,
+                "linker.ld",
+                tools
+            )
+
+            self.assertTrue(result.success, f"编译失败: {result.stderr}")
+            self.assertTrue(elf_file.exists())
+
+            # 转换为各种格式
+            hex_file = Path(tmpdir) / "test_convert.hex"
+            bin_file = Path(tmpdir) / "test_convert.bin"
+            dump_file = Path(tmpdir) / "test_convert.dump"
+
+            hex_result, bin_result, dump_result = convert_elf(
+                str(elf_file),
+                str(hex_file),
+                str(bin_file),
+                str(dump_file),
+                tools
+            )
+
+            # 验证转换结果
+            self.assertTrue(hex_result.success, f"HEX 转换失败: {hex_result.stderr}")
+            self.assertTrue(bin_result.success, f"BIN 转换失败: {bin_result.stderr}")
+            self.assertTrue(dump_result.success, f"DUMP 生成失败: {dump_result.stderr}")
+
+            # 验证输出文件存在
+            self.assertTrue(hex_file.exists(), "HEX 文件未生成")
+            self.assertTrue(bin_file.exists(), "BIN 文件未生成")
+            self.assertTrue(dump_file.exists(), "DUMP 文件未生成")
+
+            # 验证 DUMP 文件内容非空
+            dump_content = dump_file.read_text()
+            self.assertTrue(len(dump_content) > 0, "DUMP 文件为空")
+            self.assertIn("Disassembly", dump_content, "DUMP 文件应包含反汇编内容")
+
+    def test_environment_override_actual_compilation(self):
+        """测试环境变量覆盖工具链并实际编译（如果 clang 可用）。"""
+        from compile_helper import compile_assembly_from_metadata
+
+        # 检查 clang, llvm-objcopy, llvm-objdump 是否都可用
+        try:
+            subprocess.run(["clang", "--version"], capture_output=True, timeout=5)
+            subprocess.run(["llvm-objcopy", "--version"], capture_output=True, timeout=5)
+            subprocess.run(["llvm-objdump", "--version"], capture_output=True, timeout=5)
+            llvm_available = True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            llvm_available = False
+
+        if not llvm_available:
+            self.skipTest("clang/llvm 工具链不可用")
+
+        import tempfile
+        from main import process_test_cases, load_json_spec
+
+        # 保存当前环境变量
+        saved_gcc = os.environ.get("ASSEMBLY_GEN_GCC")
+        saved_objcopy = os.environ.get("ASSEMBLY_GEN_OBJCOPY")
+        saved_objdump = os.environ.get("ASSEMBLY_GEN_OBJDUMP")
+
+        try:
+            # 设置环境变量强制使用 clang
+            os.environ["ASSEMBLY_GEN_GCC"] = "clang"
+            os.environ["ASSEMBLY_GEN_OBJCOPY"] = "llvm-objcopy"
+            os.environ["ASSEMBLY_GEN_OBJDUMP"] = "llvm-objdump"
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # 生成汇编文件（包含有效元数据头部）
+                json_data = load_json_spec("resource/example.json")
+                generated_files = process_test_cases(
+                    json_data,
+                    "resource/riscv/template.S",
+                    tmpdir
+                )
+
+                # 使用 --from-metadata 路径编译（会自动检测环境变量）
+                elf_file = Path(tmpdir) / "test_env_override.elf"
+
+                result = compile_assembly_from_metadata(
+                    generated_files[0],
+                    str(elf_file.with_suffix("")),
+                    "linker.ld",
+                    None  # 工具链会自动检测（应该找到环境变量）
+                )
+
+                # 验证编译成功
+                self.assertTrue(result.success, f"环境变量覆盖编译失败: {result.stderr}")
+                self.assertTrue(elf_file.exists(), "ELF 文件未生成")
+
+        finally:
+            # 恢复原始环境变量
+            if saved_gcc is not None:
+                os.environ["ASSEMBLY_GEN_GCC"] = saved_gcc
+            elif "ASSEMBLY_GEN_GCC" in os.environ:
+                del os.environ["ASSEMBLY_GEN_GCC"]
+
+            if saved_objcopy is not None:
+                os.environ["ASSEMBLY_GEN_OBJCOPY"] = saved_objcopy
+            elif "ASSEMBLY_GEN_OBJCOPY" in os.environ:
+                del os.environ["ASSEMBLY_GEN_OBJCOPY"]
+
+            if saved_objdump is not None:
+                os.environ["ASSEMBLY_GEN_OBJDUMP"] = saved_objdump
+            elif "ASSEMBLY_GEN_OBJDUMP" in os.environ:
+                del os.environ["ASSEMBLY_GEN_OBJDUMP"]
+
+    def test_rv64_metadata_driven_compilation(self):
+        """测试 RV64 指令的元数据驱动编译（如果工具链可用）。"""
+        from compile_helper import find_toolchain, compile_assembly_from_metadata
+
+        tools = find_toolchain()
+        if tools.get("source") == "none":
+            self.skipTest("未找到可用的工具链")
+
+        import tempfile
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建 RV64 测试用例的 JSON 数据
+            rv64_json_data = {
+                "gen": [{
+                    "arch": {
+                        "name": "riscv",
+                        "xlen": "64",
+                        "pretty-name": "customcase",
+                        "ext": "I"
+                    },
+                    "test-ins": "addw x1,x2,x3",
+                    "isa-state": {
+                        "x2": "64'h0000_0000_0000_0002",
+                        "x3": "64'h0000_0000_0000_0003"
+                    }
+                }]
+            }
+
+            # 写入临时 JSON 文件
+            json_file = Path(tmpdir) / "rv64_test.json"
+            json_file.write_text(json.dumps(rv64_json_data))
+
+            # 生成汇编文件
+            generated_files = process_test_cases(
+                rv64_json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            self.assertEqual(len(generated_files), 1, "应该生成一个汇编文件")
+
+            # 验证生成的文件名包含 customcase（pretty-name）
+            generated_file = Path(generated_files[0])
+            self.assertIn("customcase", generated_file.name,
+                         f"生成的文件名应包含 'customcase': {generated_file.name}")
+
+            # 验证汇编文件头部包含正确的元数据（xlen=64, ext=I）
+            asm_content = generated_file.read_text()
+            self.assertIn("xlen=64", asm_content,
+                         "汇编文件头部应包含 xlen=64")
+            self.assertIn("ext=I", asm_content,
+                         "汇编文件头部应包含 ext=I")
+
+            # 使用 --from-metadata 编译
+            output_prefix = str(generated_file.with_suffix(""))
+
+            result = compile_assembly_from_metadata(
+                str(generated_file),
+                output_prefix,
+                "linker.ld",
+                tools
+            )
+
+            # 验证编译成功
+            self.assertTrue(result.success, f"RV64 编译失败: {result.stderr}")
+
+            # 验证 ELF 文件生成
+            elf_file = Path(f"{output_prefix}.elf")
+            self.assertTrue(elf_file.exists(), f"ELF 文件未生成: {elf_file}")
 
 
 def run_tests():

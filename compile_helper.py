@@ -361,7 +361,7 @@ def convert_elf(
     return hex_result, bin_result, dump_result
 
 
-def parse_assembly_metadata(assembly_file: str) -> CompilerConfig:
+def parse_assembly_metadata(assembly_file: str, strict: bool = False) -> CompilerConfig:
     """
     从生成的汇编文件头部解析架构元数据。
 
@@ -370,15 +370,17 @@ def parse_assembly_metadata(assembly_file: str) -> CompilerConfig:
 
     Args:
         assembly_file: 汇编文件路径
+        strict: 如果为 True，元数据缺失时抛出异常而不是回退到文件名猜测
 
     Returns:
         CompilerConfig 对象
 
     Raises:
-        ValueError: 如果无法解析元数据
+        ValueError: 如果无法解析元数据（或在 strict 模式下元数据缺失）
         FileNotFoundError: 如果文件不存在
     """
     import re
+    import os
 
     try:
         with open(assembly_file, 'r', encoding='utf-8') as f:
@@ -398,8 +400,15 @@ def parse_assembly_metadata(assembly_file: str) -> CompilerConfig:
     except Exception as e:
         raise ValueError(f"无法从 {assembly_file} 解析架构元数据: {e}")
 
-    # 如果未找到元数据，尝试从文件名推断（向后兼容）
-    import os
+    # strict 模式下，元数据缺失时抛出异常
+    if strict:
+        raise ValueError(
+            f"错误: 汇编文件 {assembly_file} 头部缺少必需的架构元数据注释。"
+            f"请确保文件前 20 行包含如下格式的注释："
+            f"# 架构: RISC-V (xlen=32, ext=IMACFD)"
+        )
+
+    # 非严格模式：如果未找到元数据，尝试从文件名推断（向后兼容）
     basename = os.path.basename(assembly_file)
 
     # 从文件名推断 xlen
@@ -432,8 +441,8 @@ def compile_assembly_from_metadata(
     Returns:
         编译结果
     """
-    # 从汇编文件解析元数据
-    config = parse_assembly_metadata(assembly_file)
+    # 从汇编文件解析元数据（严格模式）
+    config = parse_assembly_metadata(assembly_file, strict=True)
 
     # 编译为 ELF
     elf_file = f"{output_prefix}.elf"
