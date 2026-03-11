@@ -24,9 +24,16 @@ class Value:
         - 十六进制: "32'h80000000"、"8'hFF"
         - 带未知位: "32'b0011_00xx_0000_0101"
 
+    属性:
+        bits (int): 位宽
+        value (int): 实际数值（无符号，未知位替换为 0）
+        mask (int): 位掩码，1 表示有效位，0 表示未知位
+        format (str): 'b' (二进制) 或 'h' (十六进制)
+
     示例:
         >>> Value("32'b0011_0101")
         >>> Value("32'h80000000")
+        >>> Value("8'bxx01")  # 未知位
     """
 
     # 正则表达式匹配位向量格式：位宽'格式(值)
@@ -41,7 +48,7 @@ class Value:
             exp: 位向量表达式，如 "32'b0011_0101" 或 "32'h80000000"
 
         Raises:
-            ValueError: 如果表达式格式无效
+            ValueError: 如果表达式格式无效或数值超出位宽范围
         """
         if not isinstance(exp, str):
             raise ValueError(f"位向量表达式必须是字符串，收到: {type(exp)}")
@@ -63,37 +70,83 @@ class Value:
         if self.bits <= 0:
             raise ValueError(f"位宽必须为正数，收到: {self.bits}")
 
-        # 解析值
+        # 计算最大有效值（所有位都为 1 时的值）
+        max_value = (1 << self.bits) - 1
+
+        # 解析值并构建 mask
         try:
             if self.format == 'b':
-                # 二进制：将 'x' 替换为 '0' 进行解析
-                clean_str = value_str.replace('x', '0')
-                # 验证二进制字符串只包含 0 和 1（在替换 x 之后）
-                if not all(c in '01' for c in clean_str):
-                    raise ValueError(f"二进制格式只能包含 0、1 和 x，收到: {value_str}")
-                # 验证位宽匹配
-                if len(clean_str) > self.bits:
-                    raise ValueError(
-                        f"位宽不匹配: 声明为 {self.bits} 位，"
-                        f"但提供了 {len(clean_str)} 位二进制值"
-                    )
-                self.value = int(clean_str, 2) if clean_str else 0
+                self.value, self.mask = self._parse_binary(value_str, max_value)
             else:  # 'h'
-                # 十六进制：将 'x' 替换为 '0' 进行解析
-                clean_str = value_str.replace('x', '0')
-                # 验证十六进制字符串
-                if not all(c in '0123456789abcdefABCDEF' for c in clean_str):
-                    raise ValueError(f"十六进制格式只能包含 0-9、a-f 和 x，收到: {value_str}")
-                # 验证位宽匹配（每个十六进制字符代表 4 位）
-                max_hex_chars = (self.bits + 3) // 4
-                if len(clean_str) > max_hex_chars:
-                    raise ValueError(
-                        f"位宽不匹配: 声明为 {self.bits} 位，"
-                        f"但提供了 {len(clean_str)} 个十六进制字符（最多 {max_hex_chars} 个）"
-                    )
-                self.value = int(clean_str, 16) if clean_str else 0
+                self.value, self.mask = self._parse_hex(value_str, max_value)
         except ValueError as e:
             raise ValueError(f"无法解析位向量值 '{exp}': {e}")
+
+        # 严格验证：数值必须落在位宽范围内
+        if self.value > max_value:
+            raise ValueError(
+                f"位宽不匹配: 声明为 {self.bits} 位，"
+                f"但值 0x{self.value:X} 超出范围（最大值: 0x{max_value:X}）"
+            )
+
+    def _parse_binary(self, value_str: str, max_value: int) -> tuple:
+        """解析二进制格式，返回 (value, mask)。"""
+        # 验证二进制字符串只包含 0、1 和 x
+        if not all(c in '01x' for c in value_str):
+            raise ValueError(
+                f"二进制格式只能包含 0、1 和 x，收到: {value_str}"
+            )
+
+        # 验证位宽匹配（包括 x 位）
+        if len(value_str) > self.bits:
+            raise ValueError(
+                f"位宽不匹配: 声明为 {self.bits} 位，"
+                f"但提供了 {len(value_str)} 位二进制值"
+            )
+
+        # 构建 value 和 mask
+        value = 0
+        mask = 0
+        for i, c in enumerate(reversed(value_str)):
+            bit_pos = i
+            if c == '1':
+                value |= (1 << bit_pos)
+                mask |= (1 << bit_pos)
+            elif c == '0':
+                mask |= (1 << bit_pos)
+            # c == 'x' 时，不设置 value 和 mask 的对应位
+
+        return value, mask
+
+    def _parse_hex(self, value_str: str, max_value: int) -> tuple:
+        """解析十六进制格式，返回 (value, mask)。"""
+        # 验证十六进制字符串
+        if not all(c in '0123456789abcdefABCDEFx' for c in value_str):
+            raise ValueError(
+                f"十六进制格式只能包含 0-9、a-f 和 x，收到: {value_str}"
+            )
+
+        # 验证位宽匹配（每个十六进制字符代表 4 位）
+        max_hex_chars = (self.bits + 3) // 4
+        if len(value_str) > max_hex_chars:
+            raise ValueError(
+                f"位宽不匹配: 声明为 {self.bits} 位，"
+                f"但提供了 {len(value_str)} 个十六进制字符（最多 {max_hex_chars} 个）"
+            )
+
+        # 构建 value 和 mask
+        value = 0
+        mask = 0
+        for i, c in enumerate(reversed(value_str)):
+            nibble_pos = i * 4
+            if c == 'x':
+                continue  # 不设置这些位的 mask
+            # 解析十六进制字符
+            nibble_value = int(c, 16)
+            value |= (nibble_value << nibble_pos)
+            mask |= (0xF << nibble_pos)
+
+        return value, mask
 
     def to_hex(self) -> str:
         """
@@ -112,14 +165,37 @@ class Value:
         hex_digits = max(1, (self.bits + 3) // 4)
 
         # 应用位掩码
-        if self.bits <= 32:
-            masked_value = self.value & 0xFFFFFFFF
-        elif self.bits <= 64:
-            masked_value = self.value & 0xFFFFFFFFFFFFFFFF
-        else:
-            masked_value = self.value & ((1 << self.bits) - 1)
+        masked_value = self.value & ((1 << self.bits) - 1)
 
         return f"0x{masked_value:0{hex_digits}X}"
+
+    def to_bin(self) -> str:
+        """
+        转换为二进制字符串。
+
+        Returns:
+            二进制字符串，如 "0b00110101" 或 "0b1000000000000000"
+
+        示例:
+            >>> Value("8'b101").to_bin()
+            '0b00000101'
+        """
+        binary_digits = max(1, self.bits)
+        masked_value = self.value & ((1 << self.bits) - 1)
+        return f"0b{masked_value:0{binary_digits}b}"
+
+    def to_dec(self) -> str:
+        """
+        返回十进制整数字符串。
+
+        Returns:
+            十进制整数字符串
+
+        示例:
+            >>> Value("32'b0011_0101").to_dec()
+            '53'
+        """
+        return str(self.value)
 
     def to_num(self) -> int:
         """
@@ -135,6 +211,16 @@ class Value:
             2147483648
         """
         return self.value
+
+    def has_unknown_bits(self) -> bool:
+        """
+        检查是否有未知位（mask 不完整）。
+
+        Returns:
+            如果有未知位返回 True，否则返回 False
+        """
+        full_mask = (1 << self.bits) - 1
+        return self.mask != full_mask
 
     def __repr__(self) -> str:
         return f"Value('{self.bits}\"{self.format}{self.value:X}')"
@@ -272,38 +358,83 @@ class RISCV(GenericTarget):
 
         Returns:
             替换后的模板内容
+
+        Raises:
+            ValueError: 如果占位符解析失败或替换后仍有残留占位符
         """
         result = template
 
-        # 替换 GPR 占位符
+        # 第一步：构建完整的占位符值映射（所有 GPR 和受支持 CSR）
+        # 这样可以确保缺失值统一填 0，且所有 Value 解析错误都会立即报告
+        placeholder_map = {}
+
+        # 添加 GPR 值
         for reg in self.gprs:
-            placeholder = f"${{{reg}}}"
-            value_str = self.isa_state.get(reg, "0")
-            try:
-                value = Value(value_str).to_hex()
-            except ValueError:
-                # 如果解析失败，使用原始字符串或默认值
-                value = value_str if value_str != "0" else "0x00000000"
+            value_str = self.isa_state.get(reg, f"{self.xlen}'h0")
+            placeholder_map[f"${{{reg}}}"] = Value(value_str).to_hex()
+
+        # 添加 CSR 值（从 isa_state["csrs"] 或默认为 0）
+        csr_values = self.isa_state.get("csrs", {})
+        for csr_name in self.CSR_REGISTERS:
+            if csr_name in csr_values:
+                value_str = csr_values[csr_name]
+            else:
+                value_str = f"{self.xlen}'h0"
+            placeholder_map[f"${{{csr_name}}}"] = Value(value_str).to_hex()
+
+        # 第二步：执行所有占位符替换
+        for placeholder, value in placeholder_map.items():
             result = result.replace(placeholder, value)
 
-        # 替换 CSR 占位符
-        if "csrs" in self.isa_state:
-            for csr_name, csr_value in self.isa_state["csrs"].items():
-                placeholder = f"${{{csr_name}}}"
-                try:
-                    value = Value(csr_value).to_hex()
-                except ValueError:
-                    value = csr_value
-                result = result.replace(placeholder, value)
-
-        # 替换测试指令占位符
-        result = result.replace("${test_ins}", self.test_ins)
-
-        # 替换架构元数据占位符
+        # 第三步：替换测试指令和架构元数据占位符
         pretty_name = self.arch.get("pretty-name", f"rv{self.xlen}d")
+        result = result.replace("${test_ins}", self.test_ins)
         result = result.replace("${pretty_name}", pretty_name)
         result = result.replace("${xlen}", str(self.xlen))
         result = result.replace("${ext}", self.ext)
+
+        # 第四步：检测残留的占位符或格式错误的占位符
+        import re as re_module
+
+        # 首先检查是否有格式错误的占位符（如 ${x 缺少闭合括号）
+        # 查找所有 ${ 后面不跟 }...} 的模式
+        malformed_pattern = re_module.compile(r'\$\{[^}]*$|\$\{[^}]*[^\s$}]')
+        # 实际上更简单的方式：检查是否有 ${ 且后面没有对应的 }
+        # 使用负向后查找来找到 ${ 后面没有 } 的情况
+        open_brace_pattern = re_module.compile(r'\$\{[^}]*\}')
+
+        # 检查未闭合的 ${ - 在字符串中间或末尾
+        for match in re_module.finditer(r'\$\{', result):
+            # 从 ${ 开始查找下一个 }
+            start = match.start()
+            rest_of_string = result[start:]
+            # 检查是否在 rest_of_string 中有 }
+            if '}' not in rest_of_string:
+                # 没有 } ，格式错误
+                raise ValueError(
+                    f"模板中包含格式错误的占位符: {result[start:start+20]}...。"
+                    f"占位符必须格式为 ${{name}}"
+                )
+            # 检查 } 之前是否有内容（${} 是无效的）
+            after_brace = result[start+2:]
+            if after_brace.startswith('}'):
+                raise ValueError(
+                    f"模板中包含空的占位符: ${{}}。"
+                    f"占位符必须格式为 ${{name}}"
+                )
+
+        # 查找所有 ${...} 模式
+        placeholder_pattern = re_module.compile(r'\$\{[^}]+\}')
+        remaining_placeholders = placeholder_pattern.findall(result)
+
+        if remaining_placeholders:
+            # 有未替换的占位符
+            unique_unmatched = set(remaining_placeholders)
+            raise ValueError(
+                f"模板中包含 {len(unique_unmatched)} 个未替换的占位符: "
+                f"{', '.join(sorted(unique_unmatched))}。"
+                f"请检查这些占位符是否受支持。"
+            )
 
         return result
 
@@ -449,7 +580,8 @@ def get_default_template_path(arch_name: str) -> str:
 def process_test_cases(
     json_data: Dict[str, Any],
     template_path: str,
-    output_dir: str
+    output_dir: str,
+    force_overwrite: bool = False
 ) -> list:
     """
     处理所有测试用例，生成汇编文件。
@@ -458,12 +590,14 @@ def process_test_cases(
         json_data: JSON 规范数据
         template_path: 模板文件路径
         output_dir: 输出目录
+        force_overwrite: 是否强制覆盖已存在的文件
 
     Returns:
         生成的文件路径列表
 
     Raises:
         Exception: 如果生成失败
+        ValueError: 如果输出文件冲突且内容不同
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -487,6 +621,26 @@ def process_test_cases(
         test_ins = test_case["test-ins"]
         filename = generate_output_filename(pretty_name, test_ins)
         output_file = output_path / filename
+
+        # 检查文件是否已存在
+        if output_file.exists():
+            with open(output_file, 'r', encoding='utf-8') as f:
+                existing_content = f.read()
+
+            if existing_content == assembly_code:
+                # 内容相同，跳过写入
+                print(f"跳过: {output_file} (内容相同)")
+                generated_files.append(str(output_file))
+                continue
+            else:
+                # 内容不同，需要处理冲突
+                if force_overwrite:
+                    print(f"覆盖: {output_file} (内容不同)")
+                else:
+                    raise ValueError(
+                        f"输出文件冲突: {output_file} 已存在且内容不同。"
+                        f"使用 --force-overwrite 或 -F 选项强制覆盖。"
+                    )
 
         # 写入文件
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -528,6 +682,13 @@ def main():
         help='输出目录（默认: target）'
     )
 
+    parser.add_argument(
+        '-F', '--force-overwrite',
+        dest='force_overwrite',
+        action='store_true',
+        help='强制覆盖已存在的输出文件'
+    )
+
     args = parser.parse_args()
 
     try:
@@ -546,7 +707,8 @@ def main():
         generated_files = process_test_cases(
             json_data,
             template_path,
-            args.output_dir
+            args.output_dir,
+            args.force_overwrite
         )
 
         print(f"\n成功生成 {len(generated_files)} 个汇编文件")

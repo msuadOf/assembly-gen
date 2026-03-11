@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""
+Assembly-Gen 编译验证 helper 模块
+
+提供统一的编译验证功能，供 Python 集成测试和 Makefile 共用。
+支持 RISC-V GNU 工具链和 LLVM/clang 工具链。
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional, Dict, List, Tuple
+
+
+class CompileResult:
+    """编译结果。"""
+
+    def __init__(self, success: bool, stdout: str, stderr: str, returncode: int):
+        self.success = success
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode = returncode
+
+    def __str__(self) -> str:
+        if self.success:
+            return "编译成功"
+        else:
+            return f"编译失败 (返回码: {self.returncode})\n{self.stderr}"
+
+
+class CompilerConfig:
+    """编译器配置。"""
+
+    # RISC-V 扩展的标准顺序
+    EXTENSION_ORDER = "imafdlutcvhbzgsxky"
+
+    def __init__(self, xlen: int, extensions: str = ""):
+        """
+        初始化编译器配置。
+
+        Args:
+            xlen: 位宽 (32 或 64)
+            extensions: 扩展集 (如 "IMACFD")
+        """
+        self.xlen = xlen
+        self.raw_extensions = extensions
+
+    @property
+    def ordered_extensions(self) -> str:
+        """返回按标准顺序排序的扩展字符串。"""
+        if not self.raw_extensions:
+            return "imac"  # 默认扩展
+
+        # 转为小写并去重
+        exts = self.raw_extensions.lower()
+
+        # 确保基本扩展存在
+        if 'i' not in exts and 'e' not in exts:
+            exts = 'i' + exts
+
+        # 按标准顺序排序
+        ordered = []
+        added = set()
+        for e in self.EXTENSION_ORDER:
+            if e in exts and e not in added:
+                ordered.append(e)
+                added.add(e)
+
+        # 添加任何不在标准列表中的扩展
+        for e in exts:
+            if e not in added:
+                ordered.append(e)
+                added.add(e)
+
+        return ''.join(ordered)
+
+    @property
+    def march(self) -> str:
+        """生成 -march 参数。"""
+        base = "rv32" if self.xlen == 32 else "rv64"
+        exts = self.ordered_extensions
+        return f"{base}{exts}"
+
+    @property
+    def mabi(self) -> str:
+        """生成 -mabi 参数。"""
+        return "ilp32" if self.xlen == 32 else "lp64"
+
+
+def find_toolchain() -> Dict[str, str]:
+    """
+    查找可用的工具链。
+
+    优先级：
+    1. 环境变量指定的工具
+    2. RISC-V GNU 工具链 (riscv-gcc)
+    3. LLVM/clang 工具链 (clang --target=riscv{32,64})
+
+    Returns:
+        工具链命令字典，包含 'gcc', 'objcopy', 'objdump'
+    """
+    tools = {}
+
+    # 检查环境变量
+    env_gcc = os.environ.get("ASSEMBLY_GEN_GCC")
+    env_objcopy = os.environ.get("ASSEMBLY_GEN_OBJCOPY")
+    env_objdump = os.environ.get("ASSEMBLY_GEN_OBJDUMP")
+
+    if env_gcc and env_objcopy and env_objdump:
+        tools["gcc"] = env_gcc
+        tools["objcopy"] = env_objcopy
+        tools["objdump"] = env_objdump
+        tools["source"] = "environment"
+        return tools
+
+    # 检查 RISC-V GNU 工具链
+    def check_tool(name: str) -> Optional[str]:
+        """检查工具是否可用。"""
+        try:
+            result = subprocess.run(
+                [name, "--version"],
+                capture_output=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return name
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+
+    # 优先检查多架构工具链
+    riscv_gcc = check_tool("riscv-gcc")
+    riscv_objcopy = check_tool("riscv-objcopy")
+    riscv_objdump = check_tool("riscv-objdump")
+
+    if riscv_gcc and riscv_objcopy and riscv_objdump:
+        tools["gcc"] = riscv_gcc
+        tools["objcopy"] = riscv_objcopy
+        tools["objdump"] = riscv_objdump
+        tools["source"] = "gnu"
+        return tools
+
+    # 检查 32 位工具链
+    riscv32_gcc = check_tool("riscv32-unknown-elf-gcc") or check_tool("riscv32-unknown-linux-gnu-gcc")
+    riscv32_objcopy = check_tool("riscv32-unknown-elf-objcopy") or check_tool("riscv32-unknown-linux-gnu-objcopy")
+    riscv32_objdump = check_tool("riscv32-unknown-elf-objdump") or check_tool("riscv32-unknown-linux-gnu-objdump")
+
+    if riscv32_gcc and riscv32_objcopy and riscv32_objdump:
+        tools["gcc"] = riscv32_gcc
+        tools["objcopy"] = riscv32_objcopy
+        tools["objdump"] = riscv32_objdump
+        tools["source"] = "gnu"
+        return tools
+
+    # 检查 64 位工具链（仅作为备选）
+    riscv64_gcc = check_tool("riscv64-unknown-elf-gcc") or check_tool("riscv64-unknown-linux-gnu-gcc")
+    riscv64_objcopy = check_tool("riscv64-unknown-elf-objcopy") or check_tool("riscv64-unknown-linux-gnu-objcopy")
+    riscv64_objdump = check_tool("riscv64-unknown-elf-objdump") or check_tool("riscv64-unknown-linux-gnu-objdump")
+
+    if riscv64_gcc and riscv64_objcopy and riscv64_objdump:
+        tools["gcc"] = riscv64_gcc
+        tools["objcopy"] = riscv64_objcopy
+        tools["objdump"] = riscv64_objdump
+        tools["source"] = "gnu64"  # 标记为 64 位工具链
+        return tools
+
+    # 检查 LLVM/clang 工具链
+    clang = check_tool("clang")
+    llvm_objcopy = check_tool("llvm-objcopy")
+    llvm_objdump = check_tool("llvm-objdump")
+
+    if clang and llvm_objcopy and llvm_objdump:
+        tools["gcc"] = clang  # 使用 clang 作为 gcc 替代
+        tools["objcopy"] = llvm_objcopy
+        tools["objdump"] = llvm_objdump
+        tools["source"] = "llvm"
+        return tools
+
+    # 没有找到完整的工具链
+    return {"source": "none"}
+
+
+def compile_assembly(
+    assembly_file: str,
+    output_elf: str,
+    config: CompilerConfig,
+    linker_script: Optional[str] = None,
+    tools: Optional[Dict[str, str]] = None
+) -> CompileResult:
+    """
+    编译汇编文件为 ELF 格式。
+
+    Args:
+        assembly_file: 汇编文件路径
+        output_elf: 输出 ELF 文件路径
+        config: 编译器配置
+        linker_script: 链接器脚本路径 (可选)
+        tools: 工具链命令字典 (可选，自动检测)
+
+    Returns:
+        编译结果
+    """
+    if tools is None:
+        tools = find_toolchain()
+
+    if tools.get("source") == "none":
+        return CompileResult(
+            False, "", "错误: 未找到可用的 RISC-V 工具链", 1
+        )
+
+    # 构建编译命令
+    cmd = [tools["gcc"]]
+
+    # 添加架构参数
+    if tools["source"] == "llvm":
+        # LLVM/clang 使用 --target 参数
+        cmd.extend(["--target", config.march])
+    else:
+        # GNU gcc 使用 -march 和 -mabi
+        # 注意：某些 riscv-gnu-toolchain 版本使用等号格式
+        cmd.extend([f"-march={config.march}", f"-mabi={config.mabi}"])
+
+    # 添加其他选项
+    cmd.extend(["-nostdlib", "-nostartfiles", "-ffreestanding"])
+
+    # 添加链接器脚本
+    if linker_script:
+        cmd.extend(["-T", linker_script])
+
+    # 添加输入输出文件
+    cmd.extend([assembly_file, "-o", output_elf])
+
+    # 执行编译
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        success = result.returncode == 0
+        return CompileResult(
+            success,
+            result.stdout,
+            result.stderr,
+            result.returncode
+        )
+    except subprocess.TimeoutExpired:
+        return CompileResult(
+            False, "", "错误: 编译超时", 1
+        )
+    except Exception as e:
+        return CompileResult(
+            False, "", f"错误: {e}", 1
+        )
+
+
+def convert_elf(
+    elf_file: str,
+    output_hex: Optional[str] = None,
+    output_bin: Optional[str] = None,
+    output_dump: Optional[str] = None,
+    tools: Optional[Dict[str, str]] = None
+) -> Tuple[CompileResult, CompileResult, CompileResult]:
+    """
+    转换 ELF 文件为其他格式。
+
+    Args:
+        elf_file: ELF 文件路径
+        output_hex: 输出 HEX 文件路径 (可选)
+        output_bin: 输出 BIN 文件路径 (可选)
+        output_dump: 输出 dump 文件路径 (可选)
+        tools: 工具链命令字典 (可选，自动检测)
+
+    Returns:
+        (hex_result, bin_result, dump_result) 元组
+    """
+    if tools is None:
+        tools = find_toolchain()
+
+    hex_result = CompileResult(True, "", "", 0)
+    bin_result = CompileResult(True, "", "", 0)
+    dump_result = CompileResult(True, "", "", 0)
+
+    if tools.get("source") == "none":
+        error = "错误: 未找到可用的工具链"
+        hex_result = CompileResult(False, "", error, 1)
+        bin_result = CompileResult(False, "", error, 1)
+        dump_result = CompileResult(False, "", error, 1)
+        return hex_result, bin_result, dump_result
+
+    # 转换为 HEX 格式
+    if output_hex:
+        try:
+            result = subprocess.run(
+                [tools["objcopy"], "-O", "ihex", elf_file, output_hex],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            hex_result = CompileResult(
+                result.returncode == 0,
+                result.stdout,
+                result.stderr,
+                result.returncode
+            )
+        except Exception as e:
+            hex_result = CompileResult(False, "", f"错误: {e}", 1)
+
+    # 转换为 BIN 格式
+    if output_bin:
+        try:
+            result = subprocess.run(
+                [tools["objcopy"], "-O", "binary", elf_file, output_bin],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            bin_result = CompileResult(
+                result.returncode == 0,
+                result.stdout,
+                result.stderr,
+                result.returncode
+            )
+        except Exception as e:
+            bin_result = CompileResult(False, "", f"错误: {e}", 1)
+
+    # 生成 dump 文件
+    if output_dump:
+        try:
+            result = subprocess.run(
+                [tools["objdump"], "-d", elf_file],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                with open(output_dump, 'w') as f:
+                    f.write(result.stdout)
+            dump_result = CompileResult(
+                result.returncode == 0,
+                result.stdout,
+                result.stderr,
+                result.returncode
+            )
+        except Exception as e:
+            dump_result = CompileResult(False, "", f"错误: {e}", 1)
+
+    return hex_result, bin_result, dump_result
+
+
+def compile_full_pipeline(
+    assembly_file: str,
+    output_prefix: str,
+    config: CompilerConfig,
+    linker_script: Optional[str] = None,
+    tools: Optional[Dict[str, str]] = None
+) -> Dict[str, CompileResult]:
+    """
+    执行完整的编译流程：汇编 -> ELF -> HEX/BIN/DUMP。
+
+    Args:
+        assembly_file: 汇编文件路径
+        output_prefix: 输出文件前缀（不含扩展名）
+        config: 编译器配置
+        linker_script: 链接器脚本路径 (可选)
+        tools: 工具链命令字典 (可选，自动检测)
+
+    Returns:
+        包含各阶段结果的字典
+    """
+    results = {}
+
+    # 编译为 ELF
+    elf_file = f"{output_prefix}.elf"
+    results["elf"] = compile_assembly(
+        assembly_file, elf_file, config, linker_script, tools
+    )
+
+    if not results["elf"].success:
+        return results
+
+    # 转换为其他格式
+    hex_result, bin_result, dump_result = convert_elf(
+        elf_file,
+        f"{output_prefix}.hex" if results["elf"].success else None,
+        f"{output_prefix}.bin" if results["elf"].success else None,
+        f"{output_prefix}.dump" if results["elf"].success else None,
+        tools
+    )
+
+    results["hex"] = hex_result
+    results["bin"] = bin_result
+    results["dump"] = dump_result
+
+    return results
+
+
+if __name__ == "__main__":
+    # 命令行测试
+    import argparse
+
+    parser = argparse.ArgumentParser(description="测试编译工具链")
+    parser.add_argument("assembly", nargs="?", help="汇编文件路径")
+    parser.add_argument("-o", "--output", default="output", help="输出前缀")
+    parser.add_argument("-x", "--xlen", type=int, default=32, choices=[32, 64], help="位宽")
+    parser.add_argument("-e", "--extensions", default="", help="扩展集")
+    parser.add_argument("-T", "--linker", help="链接器脚本")
+    parser.add_argument("--version", action="store_true", help="显示版本信息并退出")
+
+    args = parser.parse_args()
+
+    # 处理 --version 标志
+    if args.version:
+        tools = find_toolchain()
+        source = tools.get("source", "none")
+        if source != "none":
+            print(f"工具链来源: {source}")
+            sys.exit(0)
+        else:
+            print("未找到可用的工具链")
+            sys.exit(1)
+
+    # 如果没有提供汇编文件，显示帮助信息
+    if not args.assembly:
+        parser.print_help()
+        sys.exit(1)
+
+    # 检测工具链
+    tools = find_toolchain()
+    print(f"工具链来源: {tools.get('source', 'none')}")
+    if tools.get("source") == "none":
+        print("错误: 未找到可用的工具链")
+        sys.exit(1)
+
+    # 编译
+    config = CompilerConfig(args.xlen, args.extensions)
+    print(f"编译配置: -march={config.march} -mabi={config.mabi}")
+
+    results = compile_full_pipeline(
+        args.assembly,
+        args.output,
+        config,
+        args.linker,
+        tools
+    )
+
+    # 打印结果
+    for stage, result in results.items():
+        print(f"{stage.upper()}: {result}")
+
+    # 返回码
+    sys.exit(0 if results["elf"].success else 1)

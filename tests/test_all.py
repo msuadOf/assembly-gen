@@ -202,7 +202,6 @@ class TestIntegration(unittest.TestCase):
     def test_end_to_end_generation(self):
         """测试端到端生成流程。"""
         import tempfile
-        import shutil
 
         # 创建临时输出目录
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -225,6 +224,343 @@ class TestIntegration(unittest.TestCase):
                 self.assertIn("0x00000001", content)  # x1 的值
 
 
+class TestNegativeCases(unittest.TestCase):
+    """关键负向测试用例。"""
+
+    def test_value_out_of_range_rejected(self):
+        """测试位向量数值超出位宽范围被拒绝。"""
+        # 5'hFF = 255 超过 5 位最大值 31
+        with self.assertRaises(ValueError) as context:
+            Value("5'hFF")
+        self.assertIn("超出范围", str(context.exception))
+
+        # 5'h20 = 32 超过 5 位最大值 31
+        with self.assertRaises(ValueError) as context:
+            Value("5'h20")
+        self.assertIn("超出范围", str(context.exception))
+
+    def test_value_unknown_bits_and_mask(self):
+        """测试未知位处理和 mask 属性。"""
+        v = Value("8'b1010xx00")
+        self.assertTrue(v.has_unknown_bits())
+        self.assertEqual(v.mask, 0b11110011)  # x 位不在 mask 中
+        self.assertEqual(v.value, 0b10100000)  # x 替换为 0
+
+    def test_value_to_bin_and_to_dec_methods(self):
+        """测试 to_bin() 和 to_dec() 方法。"""
+        v = Value("8'hA5")
+        self.assertEqual(v.to_bin(), "0b10100101")
+        self.assertEqual(v.to_dec(), "165")
+
+    def test_missing_required_json_fields(self):
+        """测试 JSON 缺失必需字段。"""
+        from main import validate_json_spec
+
+        # 缺少 arch.name
+        with self.assertRaises(ValueError) as context:
+            validate_json_spec({
+                "gen": [{
+                    "arch": {"xlen": "32"},
+                    "test-ins": "add x1,x1,x1",
+                    "isa-state": {}
+                }]
+            })
+        self.assertIn("name", str(context.exception))
+
+        # 缺少 arch.xlen
+        with self.assertRaises(ValueError) as context:
+            validate_json_spec({
+                "gen": [{
+                    "arch": {"name": "riscv"},
+                    "test-ins": "add x1,x1,x1",
+                    "isa-state": {}
+                }]
+            })
+        self.assertIn("xlen", str(context.exception))
+
+        # 缺少 test-ins
+        with self.assertRaises(ValueError) as context:
+            validate_json_spec({
+                "gen": [{
+                    "arch": {"name": "riscv", "xlen": "32"},
+                    "isa-state": {}
+                }]
+            })
+        self.assertIn("test-ins", str(context.exception))
+
+        # 缺少 isa-state
+        with self.assertRaises(ValueError) as context:
+            validate_json_spec({
+                "gen": [{
+                    "arch": {"name": "riscv", "xlen": "32"},
+                    "test-ins": "add x1,x1,x1"
+                }]
+            })
+        self.assertIn("isa-state", str(context.exception))
+
+    def test_empty_and_invalid_json_files(self):
+        """测试空文件和非 JSON 格式输入。"""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 空文件
+            empty_file = Path(tmpdir) / "empty.json"
+            empty_file.write_text("")
+
+            with self.assertRaises(ValueError):
+                load_json_spec(str(empty_file))
+
+            # 非 JSON 格式
+            invalid_file = Path(tmpdir) / "invalid.json"
+            invalid_file.write_text("not json")
+
+            with self.assertRaises(ValueError):
+                load_json_spec(str(invalid_file))
+
+    def test_multiple_test_cases(self):
+        """测试多个测试用例处理。"""
+        import tempfile
+
+        json_data = {
+            "gen": [
+                {
+                    "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+                    "test-ins": "add x1,x1,x1",
+                    "isa-state": {"x1": "32'h00000001"}
+                },
+                {
+                    "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+                    "test-ins": "sub x2,x2,x2",
+                    "isa-state": {"x2": "32'h00000002"}
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from main import process_test_cases
+
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            self.assertEqual(len(generated_files), 2)
+            self.assertTrue(Path(generated_files[0]).exists())
+            self.assertTrue(Path(generated_files[1]).exists())
+
+    def test_csr_default_values_when_missing(self):
+        """测试缺失 CSR 时使用默认值 0。"""
+        json_data = {
+            "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+            "test-ins": "add x1,x1,x1",
+            "isa-state": {}  # 没有任何 CSR
+        }
+        target = RISCV(json_data, "resource/riscv/template.S")
+
+        # 模板中的 ${mstatus} 应该被替换为 0x00000000
+        template = "li t0, ${mstatus}"
+        result = target.parse_template(template)
+        self.assertIn("0x00000000", result)
+        self.assertNotIn("${mstatus}", result)
+
+    def test_remaining_placeholders_rejected(self):
+        """测试未替换的占位符被拒绝。"""
+        json_data = {
+            "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+            "test-ins": "add x1,x1,x1",
+            "isa-state": {}
+        }
+        target = RISCV(json_data, "resource/riscv/template.S")
+
+        # 使用不支持的占位符
+        template = "li t0, ${unsupported_csr}"
+        with self.assertRaises(ValueError) as context:
+            target.parse_template(template)
+        self.assertIn("未替换的占位符", str(context.exception))
+
+    def test_malformed_placeholders_rejected(self):
+        """测试格式错误的占位符被拒绝。"""
+        json_data = {
+            "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+            "test-ins": "add x1,x1,x1",
+            "isa-state": {}
+        }
+        target = RISCV(json_data, "resource/riscv/template.S")
+
+        # 使用格式错误的占位符（缺少闭合括号）
+        template = "li t0, ${x"
+        with self.assertRaises(ValueError) as context:
+            target.parse_template(template)
+        self.assertIn("格式错误", str(context.exception))
+
+    def test_output_naming_conflict_detected(self):
+        """测试输出文件命名冲突检测。"""
+        import tempfile
+
+        json_data = {
+            "gen": [
+                {
+                    "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+                    "test-ins": "add x1,x1,x1",
+                    "isa-state": {"x1": "32'h00000001"}
+                },
+                {
+                    "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+                    "test-ins": "add x1,x1,x1",  # 同名
+                    "isa-state": {"x1": "32'h00000002"}  # 不同内容
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from main import process_test_cases
+
+            with self.assertRaises(ValueError) as context:
+                process_test_cases(
+                    json_data,
+                    "resource/riscv/template.S",
+                    tmpdir
+                )
+            self.assertIn("冲突", str(context.exception))
+
+    def test_output_naming_conflict_with_force_overwrite(self):
+        """测试使用 force_overwrite 覆盖冲突文件。"""
+        import tempfile
+
+        json_data = {
+            "gen": [
+                {
+                    "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+                    "test-ins": "add x1,x1,x1",
+                    "isa-state": {"x1": "32'h00000001"}
+                },
+                {
+                    "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+                    "test-ins": "add x1,x1,x1",
+                    "isa-state": {"x1": "32'h00000002"}
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from main import process_test_cases
+
+            # 使用 force_overwrite 应该成功
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir,
+                force_overwrite=True
+            )
+
+            self.assertEqual(len(generated_files), 2)
+
+    def test_invalid_bit_vector_through_template_rejected(self):
+        """测试通过模板传入的非法位向量被拒绝。"""
+        json_data = {
+            "arch": {"name": "riscv", "xlen": "32", "pretty-name": "rv32d"},
+            "test-ins": "add x1,x1,x1",
+            "isa-state": {"x1": "32'b0012"}  # 无效二进制
+        }
+        target = RISCV(json_data, "resource/riscv/template.S")
+
+        template = "li x1, ${x1}"
+        with self.assertRaises(ValueError):
+            target.parse_template(template)
+
+
+class TestCompileVerification(unittest.TestCase):
+    """编译验证测试（需要可用工具链）。"""
+
+    def test_compile_helper_available(self):
+        """测试编译 helper 是否可用。"""
+        from compile_helper import find_toolchain
+
+        tools = find_toolchain()
+        # 只验证不会抛出异常
+        self.assertIn("source", tools)
+
+    def test_compile_config_extension_ordering(self):
+        """测试编译配置的扩展集排序。"""
+        from compile_helper import CompilerConfig
+
+        config = CompilerConfig(32, "IMACFD")
+        # 扩展应该按标准顺序排列
+        self.assertEqual(config.ordered_extensions, "imafdc")
+        self.assertEqual(config.march, "rv32imafdc")
+
+    def test_happy_path_compile_with_helper(self):
+        """测试使用编译 helper 的快乐路径（如果工具链可用）。"""
+        from compile_helper import find_toolchain, CompilerConfig, compile_assembly
+
+        tools = find_toolchain()
+        if tools.get("source") == "none":
+            self.skipTest("未找到可用的工具链")
+
+        import tempfile
+        from main import process_test_cases, load_json_spec
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 生成汇编文件
+            json_data = load_json_spec("resource/example.json")
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            # 尝试编译
+            config = CompilerConfig(32, "IMACFD")
+            elf_file = Path(tmpdir) / "test_output.elf"
+
+            result = compile_assembly(
+                generated_files[0],
+                str(elf_file),
+                config,
+                "linker.ld",
+                tools
+            )
+
+            # 验证编译结果
+            self.assertTrue(result.success, f"编译失败: {result.stderr}")
+            self.assertTrue(elf_file.exists())
+
+    def test_invalid_instruction_compile_failure(self):
+        """测试无效指令导致编译失败（如果工具链可用）。"""
+        from compile_helper import find_toolchain, CompilerConfig, compile_assembly
+
+        tools = find_toolchain()
+        if tools.get("source") == "none":
+            self.skipTest("未找到可用的工具链")
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建包含无效指令的汇编文件
+            invalid_asm = Path(tmpdir) / "invalid.S"
+            invalid_asm.write_text(
+                ".section .text\n"
+                ".globl _start\n"
+                "_start:\n"
+                "    invalid_instruction_xyz  # 无效指令\n"
+            )
+
+            config = CompilerConfig(32, "IMAC")
+            elf_file = Path(tmpdir) / "invalid.elf"
+
+            result = compile_assembly(
+                str(invalid_asm),
+                str(elf_file),
+                config,
+                None,
+                tools
+            )
+
+            # 编译应该失败
+            self.assertFalse(result.success)
+
+
 def run_tests():
     """运行所有测试。"""
     # 创建测试套件
@@ -237,6 +573,8 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestJSONParsing))
     suite.addTests(loader.loadTestsFromTestCase(TestRISCVClass))
     suite.addTests(loader.loadTestsFromTestCase(TestIntegration))
+    suite.addTests(loader.loadTestsFromTestCase(TestNegativeCases))
+    suite.addTests(loader.loadTestsFromTestCase(TestCompileVerification))
 
     # 运行测试
     runner = unittest.TextTestRunner(verbosity=2)
