@@ -1120,29 +1120,31 @@ class TestCompileVerification(unittest.TestCase):
         from compile_helper import CompilerConfig
 
         # 测试用例：(xlen, extensions, expected_march)
+        # 注意：GCC 格式要求所有扩展直接连接，无下划线分隔
+        # 这是 Round 13 修复：之前使用的 spec 格式（带下划线）被 GCC 拒绝
         test_cases = [
             # 单字母扩展
             (32, "I", "rv32i"),
             (32, "IMACFD", "rv32imafdc"),
             # 单个多字母扩展
-            (32, "zicsr", "rv32i_zicsr"),
-            (32, "IMACFD_zicsr", "rv32imafdc_zicsr"),
+            (32, "zicsr", "rv32izicsr"),
+            (32, "IMACFD_zicsr", "rv32imafdczicsr"),
             # 多个多字母扩展（关键测试用例）
-            (32, "I_zicsr_zifencei", "rv32i_zicsr_zifencei"),
-            (32, "Zicsr_Zifencei", "rv32i_zicsr_zifencei"),
-            (32, "IMACFD_zicsr_zifencei", "rv32imafdc_zicsr_zifencei"),
+            (32, "I_zicsr_zifencei", "rv32izicsrzifencei"),
+            (32, "Zicsr_Zifencei", "rv32izicsrzifencei"),
+            (32, "IMACFD_zicsr_zifencei", "rv32imafdczicsrzifencei"),
             # RV64 测试
-            (64, "IMACFD_zicsr", "rv64imafdc_zicsr"),
-            (64, "I_zicsr_zifencei", "rv64i_zicsr_zifencei"),
-            # G 扩展简写测试（Round 4 回归测试）
-            (32, "G", "rv32imafd_zicsr_zifencei"),
-            (32, "GC", "rv32imafdc_zicsr_zifencei"),
-            (64, "G", "rv64imafd_zicsr_zifencei"),
-            (32, "IMACG", "rv32imafdc_zicsr_zifencei"),
-            # 未知 z* 扩展测试（Round 4 回归测试）
-            (32, "zmmul", "rv32i_zmmul"),
-            (32, "I_zmmul", "rv32i_zmmul"),
-            (32, "IMAC_zmmul_zicsr", "rv32imac_zmmul_zicsr"),
+            (64, "IMACFD_zicsr", "rv64imafdczicsr"),
+            (64, "I_zicsr_zifencei", "rv64izicsrzifencei"),
+            # G 扩展简写测试（Round 4 回归测试，Round 13 更新格式）
+            (32, "G", "rv32imafdzicsrzifencei"),
+            (32, "GC", "rv32imafdczicsrzifencei"),
+            (64, "G", "rv64imafdzicsrzifencei"),
+            (32, "IMACG", "rv32imafdczicsrzifencei"),
+            # 未知 z* 扩展测试（Round 4 回归测试，Round 13 更新格式）
+            (32, "zmmul", "rv32izmmul"),
+            (32, "I_zmmul", "rv32izmmul"),
+            (32, "IMAC_zmmul_zicsr", "rv32imaczmmulzicsr"),
         ]
 
         for xlen, ext, expected in test_cases:

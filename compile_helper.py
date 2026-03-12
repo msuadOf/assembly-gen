@@ -178,8 +178,11 @@ class CompilerConfig:
     def march(self) -> str:
         """生成 -march 参数。
 
-        RISC-V ISA 规范：单字母扩展直接连接，多字母扩展用下划线分隔。
-        例如: rv32imafdc, rv32i_zicsr, rv32imafdc_zicsr_zifencei
+        GCC 格式：所有扩展直接连接，无分隔符。
+        例如: rv32imafdc, rv32izicsr, rv32imafdczicsrzifencei
+
+        注意：这是编译器工具链使用的格式，与 RISC-V ISA 规范的
+        spec 格式（多字母扩展用下划线分隔）不同。
         """
         base = "rv32" if self.xlen == 32 else "rv64"
 
@@ -201,18 +204,18 @@ class CompilerConfig:
         if 'i' not in added and 'e' not in added:
             ordered_single.insert(0, 'i')
 
-        # 构建扩展字符串
+        # 构建扩展字符串（所有扩展直接连接，无分隔符）
         single_str = ''.join(ordered_single)
 
         if single_str and self._multi_exts:
-            # 两种都有：单字母在前，多字母用下划线连接
-            return f"{base}{single_str}_{'_'.join(self._multi_exts)}"
+            # 两种都有：所有扩展直接连接
+            return f"{base}{single_str}{''.join(self._multi_exts)}"
         elif single_str:
             # 只有单字母扩展
             return f"{base}{single_str}"
         elif self._multi_exts:
             # 只有多字母扩展
-            return f"{base}_{'_'.join(self._multi_exts)}"
+            return f"{base}{''.join(self._multi_exts)}"
         else:
             # 没有扩展
             return base

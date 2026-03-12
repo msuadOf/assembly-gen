@@ -66,9 +66,10 @@ ${x31_init}
     li ${scratch_reg}, ${mie}
     csrw mie, ${scratch_reg}
 
-    # satp 需要特殊处理（可能未实现，取决于平台）
-    li ${scratch_reg}, ${satp}
-    csrw satp, ${scratch_reg}
+    # 注意：satp 只在 S-mode 中存在，M-mode 核心写入会引发非法指令陷阱
+    # 如果需要 S-mode 支持，请取消下面的注释
+    # li ${scratch_reg}, ${satp}
+    # csrw satp, ${scratch_reg}
 
     # 恢复 scratch 寄存器
     ${scratch_reg_restore}
@@ -92,9 +93,8 @@ ${x31_init}
     ${test_ins}
 
     # === 结束标记 ===
-    nop
-    nop
-
-    # 退出（使用 ecall）
-    li a0, 0
-    ecall
+    # 使用无限循环终止程序（避免 ecall 依赖 mtvec）
+    # 对于模拟器/仿真器，可以检测到此循环并停止执行
+    infinite_loop:
+        wfi
+        j infinite_loop
