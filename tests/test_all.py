@@ -1153,6 +1153,33 @@ class TestCompileVerification(unittest.TestCase):
                 self.assertEqual(config.march, expected,
                                f"CompilerConfig({xlen}, '{ext}').march 应为 '{expected}'，实际为 '{config.march}'")
 
+    def test_vendor_and_supervisor_extensions(self):
+        """测试供应商扩展 (x*) 和监督器扩展 (s*) 正确处理（Round 14 回归测试）。"""
+        from compile_helper import CompilerConfig
+
+        # 测试用例：(xlen, extensions, expected_march)
+        # x* 扩展和 s* 扩展应保持完整，不被拆分
+        test_cases = [
+            # 供应商扩展 (x*)
+            (32, "I_xfoo", "rv32ixfoo"),
+            (32, "I_xbar_xbaz", "rv32ixbarxbaz"),
+            (32, "xfoo", "rv32ixfoo"),
+            # 监督器扩展 (s*)
+            (32, "I_sstc", "rv32isstc"),
+            (32, "I_sstc_sspevent", "rv32isstcsspevent"),
+            # 混合扩展
+            (32, "IMAC_xfoo_sstc_zicsr", "rv32imacxfoosstczicsr"),
+            # 大小写不敏感
+            (32, "I_XFOO", "rv32ixfoo"),
+            (32, "I_SSTC", "rv32isstc"),
+        ]
+
+        for xlen, ext, expected in test_cases:
+            with self.subTest(xlen=xlen, ext=ext):
+                config = CompilerConfig(xlen, ext)
+                self.assertEqual(config.march, expected,
+                               f"CompilerConfig({xlen}, '{ext}').march 应为 '{expected}'，实际为 '{config.march}'")
+
     def test_x30_preservation_in_template(self):
         """测试模板正确加载 x30 的用户值（AC-3a 回归测试）。"""
         import tempfile

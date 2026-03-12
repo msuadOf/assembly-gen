@@ -89,10 +89,16 @@ class CompilerConfig:
             if token in self.KNOWN_MULTI_LETTER_EXTENSIONS:
                 multi_exts.append(token)
                 continue
-            elif len(token) > 1 and token[0] == 'z':
-                # z 开头的扩展，视为多字母扩展（即使不在已知列表中）
-                multi_exts.append(token)
-                continue
+            elif len(token) > 1:
+                # 检查是否为标准前缀的多字母扩展
+                # z*: 标准扩展 (zicsr, zifencei, etc.)
+                # x*: 供应商特定扩展
+                # s*: 监督器级别扩展
+                first_char = token[0].lower()
+                if first_char in ('z', 'x', 's'):
+                    # 保留整个 token 作为多字母扩展
+                    multi_exts.append(token)
+                    continue
 
             # 处理单字母扩展或混合 token
             i = 0
@@ -366,17 +372,17 @@ def find_toolchain() -> Dict[str, str]:
         # 验证环境变量覆盖指向有效的 RISC-V 工具
         # 如果环境变量指定的工具不是 RISC-V 工具，则忽略该覆盖并使用自动检测
         if env_gcc:
-            # 使用 check_riscv_gcc 验证是 RISC-V gcc（不只是任何 gcc）
+            # 使用 check_riscv_gcc 验证是 RISC-V gcc 或 clang
             riscv_gcc = check_riscv_gcc(env_gcc)
             if riscv_gcc:
                 tools["gcc"] = env_gcc
             else:
-                # 环境变量指定的不是 RISC-V gcc，使用自动检测
-                tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
+                # 环境变量指定的不是 RISC-V 工具，使用自动检测（包括 clang）
+                tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc") or check_riscv_gcc("clang")
 
         else:
-            # 尝试自动检测 RISC-V gcc（避免原生 gcc）
-            tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
+            # 尝试自动检测 RISC-V 工具链（包括 GNU 和 clang）
+            tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc") or check_riscv_gcc("clang")
 
         # 注意：当环境变量覆盖被设置时，不回退到原生 gcc
         # 如果找不到 RISC-V 工具链，让后续验证（line 364）处理并回退到完全自动检测
@@ -522,6 +528,11 @@ def compile_assembly(
 
     # 添加输入输出文件
     cmd.extend([assembly_file, "-o", output_elf])
+
+    # 确保输出目录存在
+    output_dir = os.path.dirname(output_elf)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     # 执行编译
     try:
