@@ -501,7 +501,7 @@ def generate_output_filename(pretty_name: str, test_ins: str) -> str:
     """
     生成输出文件名。
 
-    命名格式: template_{pretty-name}_{sanitized-test-ins}.S
+    命名格式: template_{sanitized-pretty-name}_{sanitized-test-ins}.S
 
     Args:
         pretty_name: 架构的 pretty-name
@@ -514,8 +514,9 @@ def generate_output_filename(pretty_name: str, test_ins: str) -> str:
         >>> generate_output_filename("rv32d", "add x1,x1,x1")
         'template_rv32d_add_x1_x1_x1.S'
     """
+    sanitized_name = sanitize_filename(pretty_name)
     sanitized_ins = sanitize_filename(test_ins)
-    return f"template_{pretty_name}_{sanitized_ins}.S"
+    return f"template_{sanitized_name}_{sanitized_ins}.S"
 
 
 def validate_json_spec(json_data: Dict[str, Any]) -> None:
@@ -615,7 +616,8 @@ def get_default_template_path(arch_name: str) -> str:
     Returns:
         默认模板路径
     """
-    return f"resource/{arch_name}/template.S"
+    # 规范化为小写，确保在大小写敏感的文件系统上正常工作
+    return f"resource/{arch_name.lower()}/template.S"
 
 
 def process_test_cases(

@@ -255,6 +255,7 @@ def find_toolchain() -> Dict[str, str]:
             result = subprocess.run(
                 [name, "--version"],
                 capture_output=True,
+                text=True,
                 timeout=5
             )
             if result.returncode != 0:
@@ -268,6 +269,7 @@ def find_toolchain() -> Dict[str, str]:
             test_result = subprocess.run(
                 [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
                 capture_output=True,
+                text=True,
                 timeout=5
             )
             # 如果成功或只输出警告而非错误，则认为是有效的 RISC-V gcc

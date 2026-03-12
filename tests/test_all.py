@@ -1303,6 +1303,44 @@ class TestCompileVerification(unittest.TestCase):
             self.assertIn("customjsontest", generated_file.name.lower(),
                          f"生成的文件名应包含 'customjsontest': {generated_file.name}")
 
+    def test_pretty_name_sanitization(self):
+        """测试 pretty-name 中的路径分隔符被正确清理（Round 5 回归测试）。"""
+        # 测试包含路径分隔符的 pretty-name
+        unsafe_names = [
+            ("rv32/debug", "rv32_debug"),
+            ("test/subdir", "test_subdir"),
+            ("name:with:colons", "name_with_colons"),
+            ("path\\with\\backslash", "path_with_backslash"),
+        ]
+
+        for input_name, expected_safe in unsafe_names:
+            with self.subTest(input_name=input_name):
+                filename = generate_output_filename(input_name, "add x1,x1,x1")
+                # 验证不包含路径分隔符
+                self.assertNotIn("/", filename)
+                self.assertNotIn("\\", filename)
+                self.assertNotIn(":", filename)
+                # 验证包含安全版本
+                self.assertIn(expected_safe, filename)
+
+    def test_architecture_name_case_insensitive(self):
+        """测试架构名称大小写不敏感（Round 5 回归测试）。"""
+        from main import get_default_template_path
+
+        # 测试不同大小写的架构名称
+        test_cases = [
+            ("riscv", "resource/riscv/template.S"),
+            ("RISCV", "resource/riscv/template.S"),
+            ("RiscV", "resource/riscv/template.S"),
+            ("RiScV", "resource/riscv/template.S"),
+        ]
+
+        for arch_name, expected_path in test_cases:
+            with self.subTest(arch_name=arch_name):
+                result = get_default_template_path(arch_name)
+                self.assertEqual(result, expected_path,
+                               f"架构名称 '{arch_name}' 应解析为 '{expected_path}'")
+
 
 def run_tests():
     """运行所有测试。"""
