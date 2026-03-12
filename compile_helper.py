@@ -286,14 +286,38 @@ def find_toolchain() -> Dict[str, str]:
 
             # 对于 RISC-V gcc，验证能处理 RISC-V 选项
             if is_riscv_gcc:
-                test_result = subprocess.run(
-                    [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
-                    return name
+                # 首先尝试检测工具链是 32 位还是 64 位
+                is_64bit = "riscv64" in version_output
+
+                if is_64bit:
+                    # 64 位工具链，先尝试 rv64i，失败则尝试 rv32i with ilp32
+                    test_result = subprocess.run(
+                        [name, "-march=rv64i", "-mabi=lp64", "-c", "-x", "assembler", "-"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
+                        return name
+                    # 尝试 rv32i with ilp32
+                    test_result = subprocess.run(
+                        [name, "-march=rv32i", "-mabi=ilp32", "-c", "-x", "assembler", "-"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
+                        return name
+                else:
+                    # 32 位工具链或未知，尝试 rv32i
+                    test_result = subprocess.run(
+                        [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
+                        return name
                 return None
 
             # 对于 clang，验证可用性（clang 可以通过 -target riscv32/riscv64 编译）
@@ -372,18 +396,18 @@ def find_toolchain() -> Dict[str, str]:
         else:
             tools["objdump"] = check_tool("riscv-objdump") or check_tool("riscv32-unknown-elf-objdump") or check_tool("riscv64-unknown-elf-objdump") or check_tool("llvm-objdump") or check_tool("objdump")
 
-        # 检测是否为 LLVM 工具链
-        gcc_basename = os.path.basename(tools.get("gcc", ""))
-        if "clang" in gcc_basename or gcc_basename == "clang":
-            tools["source"] = "llvm"
-        else:
-            tools["source"] = "gnu"
-
-        # 验证所有必需工具都已找到
+        # 验证所有必需工具都已找到（在检测工具链类型之前）
         if not all(tools.get(k) for k in ["gcc", "objcopy", "objdump"]):
             # 环境覆盖不完整，回退到自动检测
             has_env_override = False
             tools = {}
+        else:
+            # 检测是否为 LLVM 工具链（只在所有工具都找到时执行）
+            gcc_basename = os.path.basename(tools.get("gcc", ""))
+            if "clang" in gcc_basename or gcc_basename == "clang":
+                tools["source"] = "llvm"
+            else:
+                tools["source"] = "gnu"
 
     if has_env_override:
         return tools
@@ -426,7 +450,8 @@ def find_toolchain() -> Dict[str, str]:
         return tools
 
     # 检查 LLVM/clang 工具链
-    clang = check_tool("clang")
+    # 使用 check_riscv_gcc 验证 clang 是否支持 RISC-V 后端
+    clang = check_riscv_gcc("clang")
     llvm_objcopy = check_tool("llvm-objcopy")
     llvm_objdump = check_tool("llvm-objdump")
 
