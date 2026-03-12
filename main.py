@@ -432,6 +432,8 @@ class RISCV(GenericTarget):
             result = result.replace("${stack_load}", "ld")
 
         # 获取已替换的 CSR 值（从 placeholder_map 中获取）
+        # 需要为所有指定的 CSR 生成初始化代码
+        csr_values = self.isa_state.get("csrs", {})
         mstatus_val = placeholder_map.get("${mstatus}", "0x00000000")
         mepc_val = placeholder_map.get("${mepc}", "0x00000000")
         x30_val = placeholder_map.get("${x30}", "0x00000000")
@@ -441,6 +443,7 @@ class RISCV(GenericTarget):
         # RV32E 只有 16 个通用寄存器 (x0-x15)，不能使用 x16-x31
         # 使用 s0/s1 作为 scratch 寄存器，而不是 t5/t6 (x30/x31)
         if self.is_rv32e:
+            scratch_reg = "s1"  # x9
             # 使用 s0 (x8) 保存原始 sp
             result = result.replace("${sp_save_comment}",
                 "# 使用 x8 (s0) 作为临时寄存器保存 sp")
@@ -460,10 +463,23 @@ class RISCV(GenericTarget):
             stack_load_op = "lw" if self.xlen == 32 else "ld"
             result = result.replace("${csr_scratch_save}",
                 f"{stack_store_op} s1, -{xlen_bytes}(sp)")
-            result = result.replace("${csr_init_mstatus}",
-                f"li s1, {mstatus_val}\n    csrw mstatus, s1")
-            result = result.replace("${csr_init_mepc}",
-                f"li s1, {mepc_val}\n    csrw mepc, s1")
+
+            # 生成 CSR 初始化块（使用 s1 作为 scratch）
+            csr_init_lines = []
+            for csr_name in sorted(csr_values.keys()):
+                csr_val = placeholder_map.get(f"${{{csr_name}}}", "0x00000000")
+                csr_init_lines.append(f"    li s1, {csr_val}")
+                csr_init_lines.append(f"    csrw {csr_name}, s1")
+
+            # 如果没有指定任何 CSR，至少初始化 mstatus 和 mepc
+            if not csr_init_lines:
+                csr_init_lines.append(f"    li s1, {mstatus_val}")
+                csr_init_lines.append("    csrw mstatus, s1")
+                csr_init_lines.append(f"    li s1, {mepc_val}")
+                csr_init_lines.append("    csrw mepc, s1")
+
+            csr_init_block = "\n".join(csr_init_lines)
+            result = result.replace("${csr_init_block}", csr_init_block)
             result = result.replace("${csr_scratch_restore}",
                 f"{stack_load_op} s1, -{xlen_bytes}(sp)")
             result = result.replace("${sp_restore_move}",
@@ -473,6 +489,7 @@ class RISCV(GenericTarget):
             result = result.replace("${x30_restore_instruction}",
                 "# RV32E 不支持 x30")
         else:
+            scratch_reg = "t6"  # x31
             # 使用 t5 (x30) 保存原始 sp
             result = result.replace("${sp_save_comment}",
                 "# 使用 x30 (t5) 作为临时寄存器保存 sp")
@@ -501,10 +518,23 @@ class RISCV(GenericTarget):
             stack_load_op = "lw" if self.xlen == 32 else "ld"
             result = result.replace("${csr_scratch_save}",
                 f"{stack_store_op} t6, -{xlen_bytes}(sp)")
-            result = result.replace("${csr_init_mstatus}",
-                f"li t6, {mstatus_val}\n    csrw mstatus, t6")
-            result = result.replace("${csr_init_mepc}",
-                f"li t6, {mepc_val}\n    csrw mepc, t6")
+
+            # 生成 CSR 初始化块（使用 t6 作为 scratch）
+            csr_init_lines = []
+            for csr_name in sorted(csr_values.keys()):
+                csr_val = placeholder_map.get(f"${{{csr_name}}}", "0x00000000")
+                csr_init_lines.append(f"    li t6, {csr_val}")
+                csr_init_lines.append(f"    csrw {csr_name}, t6")
+
+            # 如果没有指定任何 CSR，至少初始化 mstatus 和 mepc
+            if not csr_init_lines:
+                csr_init_lines.append(f"    li t6, {mstatus_val}")
+                csr_init_lines.append("    csrw mstatus, t6")
+                csr_init_lines.append(f"    li t6, {mepc_val}")
+                csr_init_lines.append("    csrw mepc, t6")
+
+            csr_init_block = "\n".join(csr_init_lines)
+            result = result.replace("${csr_init_block}", csr_init_block)
             result = result.replace("${csr_scratch_restore}",
                 f"{stack_load_op} t6, -{xlen_bytes}(sp)")
             result = result.replace("${sp_restore_move}",
@@ -751,7 +781,20 @@ def process_test_cases(
         assembly_code = target.gen_assembly()
 
         # 生成输出文件名
-        pretty_name = test_case["arch"].get("pretty-name", f"rv{target.xlen}d")
+        # 如果未提供 pretty-name，则从实际 ISA 推导
+        arch = test_case["arch"]
+        provided_pretty_name = arch.get("pretty-name")
+        if provided_pretty_name:
+            pretty_name = provided_pretty_name
+        else:
+            # 从 xlen 和 ext 推导 pretty-name
+            ext = arch.get("ext", "")
+            if ext:
+                # 标准化扩展名（转小写，移除下划线）
+                normalized_ext = ext.lower().replace("_", "")
+                pretty_name = f"rv{target.xlen}{normalized_ext}"
+            else:
+                pretty_name = f"rv{target.xlen}d"
         test_ins = test_case["test-ins"]
         filename = generate_output_filename(pretty_name, test_ins)
         output_file = output_path / filename

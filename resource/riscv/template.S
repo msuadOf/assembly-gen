@@ -39,10 +39,9 @@ ${x31_init}
 
     # === CSR 初始化 ===
     # ${csr_scratch_comment}
-    # ${csr_scratch_save}
-    ${csr_init_mstatus}
-    ${csr_init_mepc}
-    # ${csr_scratch_restore}
+    ${csr_scratch_save}
+${csr_init_block}
+    ${csr_scratch_restore}
 
     # 恢复原始栈指针
     ${sp_restore_move}
