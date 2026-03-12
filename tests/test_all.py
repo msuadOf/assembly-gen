@@ -1134,6 +1134,15 @@ class TestCompileVerification(unittest.TestCase):
             # RV64 测试
             (64, "IMACFD_zicsr", "rv64imafdc_zicsr"),
             (64, "I_zicsr_zifencei", "rv64i_zicsr_zifencei"),
+            # G 扩展简写测试（Round 4 回归测试）
+            (32, "G", "rv32imafd_zicsr_zifencei"),
+            (32, "GC", "rv32imafdc_zicsr_zifencei"),
+            (64, "G", "rv64imafd_zicsr_zifencei"),
+            (32, "IMACG", "rv32imafdc_zicsr_zifencei"),
+            # 未知 z* 扩展测试（Round 4 回归测试）
+            (32, "zmmul", "rv32i_zmmul"),
+            (32, "I_zmmul", "rv32i_zmmul"),
+            (32, "IMAC_zmmul_zicsr", "rv32imac_zmmul_zicsr"),
         ]
 
         for xlen, ext, expected in test_cases:
@@ -1246,6 +1255,53 @@ class TestCompileVerification(unittest.TestCase):
                          "RV64 应使用 sd 指令保存 t6")
             self.assertIn("ld t6,", asm_content,
                          "RV64 应使用 ld 指令恢复 t6")
+
+    def test_makefile_gen_json_parameter(self):
+        """测试 make gen JSON= 参数正确生效（Round 4 回归测试）。"""
+        import subprocess
+        import tempfile
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建自定义 JSON 文件
+            custom_json_data = {
+                "gen": [{
+                    "arch": {
+                        "name": "riscv",
+                        "xlen": "32",
+                        "pretty-name": "customjsontest",
+                        "ext": "I"
+                    },
+                    "test-ins": "add x5, x5, x5",
+                    "isa-state": {}
+                }]
+            }
+
+            custom_json_path = Path(tmpdir) / "custom_test.json"
+            custom_json_path.write_text(json.dumps(custom_json_data))
+
+            # 使用 make gen JSON= 参数
+            output_dir = Path(tmpdir) / "output"
+            result = subprocess.run(
+                ["make", "gen", f"JSON={custom_json_path}", f"OUTPUT_DIR={output_dir}"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=Path.cwd()
+            )
+
+            # 验证 make 命令成功
+            self.assertEqual(result.returncode, 0,
+                           f"make gen JSON= 失败: {result.stderr}")
+
+            # 验证生成的文件名包含自定义 pretty-name
+            generated_files = list(output_dir.glob("*.S"))
+            self.assertTrue(len(generated_files) > 0, f"未找到生成的汇编文件在 {output_dir}")
+
+            # 验证文件名包含自定义标识
+            generated_file = generated_files[0]
+            self.assertIn("customjsontest", generated_file.name.lower(),
+                         f"生成的文件名应包含 'customjsontest': {generated_file.name}")
 
 
 def run_tests():

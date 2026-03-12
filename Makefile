@@ -46,11 +46,12 @@ check-tools:
 		 exit 1)
 
 # 生成汇编文件
+# 支持 JSON= 参数指定自定义 JSON 文件
 .PHONY: gen
 gen:
 	@echo "生成汇编文件..."
 	@mkdir -p $(OUTPUT_DIR)
-	$(PYTHON) $(MAIN_SCRIPT) --template $(DEFAULT_TEMPLATE) $(DEFAULT_JSON) --output_dir $(OUTPUT_DIR)
+	$(PYTHON) $(MAIN_SCRIPT) --template $(DEFAULT_TEMPLATE) $(or $(JSON),$(DEFAULT_JSON)) --output_dir $(OUTPUT_DIR)
 
 # 使用自定义 JSON 文件生成
 .PHONY: gen-custom

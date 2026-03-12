@@ -39,8 +39,14 @@ class CompilerConfig:
     KNOWN_MULTI_LETTER_EXTENSIONS = [
         "zicsr", "zifencei", "zba", "zbb", "zbc", "zbs",
         "zfh", "zfhmin", "zdinx", "zfinx", "zhinx",
-        "zkn", "zks", "zkt", "zve32f", "zve64d"
+        "zkn", "zks", "zkt", "zve32f", "zve64d",
+        "zmmul", "zbpbo", "zca", "zcb", "zcd", "zcf",
+        "zce", "zcmp", "zcmt"
     ]
+
+    # G 扩展简写展开为实际扩展
+    # G = IMAFD_Zicsr_Zifencei (标准通用扩展集)
+    G_EXPANSION = "imafd_zicsr_zifencei"
 
     def __init__(self, xlen: int, extensions: str = ""):
         """
@@ -48,7 +54,7 @@ class CompilerConfig:
 
         Args:
             xlen: 位宽 (32 或 64)
-            extensions: 扩展集 (如 "IMACFD", "I_zicsr_zifencei")
+            extensions: 扩展集 (如 "IMACFD", "I_zicsr_zifencei", "GC")
         """
         self.xlen = xlen
         self.raw_extensions = extensions
@@ -59,6 +65,7 @@ class CompilerConfig:
         """解析扩展字符串，返回 (单字母扩展列表, 多字母扩展列表)。
 
         使用基于 token 的解析，确保多字母扩展被正确识别和保留。
+        支持 G 扩展简写自动展开。
         """
         if not self.raw_extensions:
             return (['i', 'm', 'a', 'c'], [])  # 默认扩展
@@ -79,47 +86,46 @@ class CompilerConfig:
             # 检查是否为已知的多字母扩展
             if token in self.KNOWN_MULTI_LETTER_EXTENSIONS:
                 multi_exts.append(token)
+                continue
             elif len(token) > 1 and token[0] == 'z':
-                # 未知的多字母扩展（z 开头），尝试匹配已知扩展
-                matched = False
-                for known in self.KNOWN_MULTI_LETTER_EXTENSIONS:
-                    if token.startswith(known):
-                        multi_exts.append(known)
-                        # 处理剩余部分
-                        remaining = token[len(known):]
-                        if remaining:
-                            # 递归处理剩余部分
-                            remaining_single, remaining_multi = CompilerConfig(
-                                self.xlen, remaining
-                            )._parse_extensions()
-                            single_exts.extend(remaining_single)
-                            multi_exts.extend(remaining_multi)
-                        matched = True
-                        break
-                if not matched:
-                    # 无法识别的 z 开头扩展，按单字母处理
-                    for ch in token:
-                        if ch.isalpha():
-                            single_exts.append(ch)
-            else:
-                # 单字母扩展或无分隔符的多字母扩展组合
-                i = 0
-                while i < len(token):
-                    # 检查是否为已知的多字母扩展（从当前位置开始）
-                    matched_multi = False
-                    for known in sorted(self.KNOWN_MULTI_LETTER_EXTENSIONS, key=len, reverse=True):
-                        if token[i:].startswith(known):
-                            multi_exts.append(known)
-                            i += len(known)
-                            matched_multi = True
-                            break
-                    if matched_multi:
-                        continue
+                # z 开头的扩展，视为多字母扩展（即使不在已知列表中）
+                multi_exts.append(token)
+                continue
 
-                    # 单字母扩展
-                    if token[i].isalpha():
-                        single_exts.append(token[i])
+            # 处理单字母扩展或混合 token
+            i = 0
+            while i < len(token):
+                # 检查是否为已知的多字母扩展（从当前位置开始）
+                matched_multi = False
+                for known in sorted(self.KNOWN_MULTI_LETTER_EXTENSIONS, key=len, reverse=True):
+                    if token[i:].startswith(known):
+                        multi_exts.append(known)
+                        i += len(known)
+                        matched_multi = True
+                        break
+                if matched_multi:
+                    continue
+
+                # 检查是否为未知的 z 开头扩展
+                if token[i] == 'z' and i + 1 < len(token) and token[i+1].isalpha():
+                    j = i + 1
+                    while j < len(token) and token[j].isalpha():
+                        j += 1
+                    multi_exts.append(token[i:j])
+                    i = j
+                    continue
+
+                # 处理 G 扩展简写：展开为单字母 + 多字母扩展
+                if token[i] == 'g':
+                    single_exts.extend(['i', 'm', 'a', 'f', 'd'])
+                    multi_exts.extend(['zicsr', 'zifencei'])
                     i += 1
+                    continue
+
+                # 普通单字母扩展
+                if token[i].isalpha():
+                    single_exts.append(token[i])
+                i += 1
 
         # 去重并保持顺序
         seen_single = set()
