@@ -389,13 +389,17 @@ class RISCV(GenericTarget):
             placeholder_map[f"${{{reg}}}"] = Value(value_str).to_hex()
 
         # 添加 CSR 值（从 isa_state["csrs"] 或默认为 0）
+        # 支持所有 CSR，不限于预定义列表
         csr_values = self.isa_state.get("csrs", {})
+
+        # 添加 JSON 中提供的所有 CSR 值
+        for csr_name, csr_value in csr_values.items():
+            placeholder_map[f"${{{csr_name}}}"] = Value(csr_value).to_hex()
+
+        # 为预定义的 CSR 添加默认值（如果 JSON 中未提供）
         for csr_name in self.CSR_REGISTERS:
-            if csr_name in csr_values:
-                value_str = csr_values[csr_name]
-            else:
-                value_str = f"{self.xlen}'h0"
-            placeholder_map[f"${{{csr_name}}}"] = Value(value_str).to_hex()
+            if csr_name not in csr_values:
+                placeholder_map[f"${{{csr_name}}}"] = Value(f"{self.xlen}'h0").to_hex()
 
         # 第二步：执行所有占位符替换
         for placeholder, value in placeholder_map.items():
