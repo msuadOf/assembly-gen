@@ -106,10 +106,47 @@ class CompilerConfig:
 
     @property
     def march(self) -> str:
-        """生成 -march 参数。"""
+        """生成 -march 参数。
+
+        RISC-V ISA 规范：单字母扩展直接连接，多字母扩展用下划线分隔。
+        例如: rv32imafdc, rv32i_zicsr, rv32imafdc_zicsr
+        """
         base = "rv32" if self.xlen == 32 else "rv64"
         exts = self.ordered_extensions
-        return f"{base}{exts}"
+
+        # 分离单字母和多字母扩展
+        single_letters = []
+        multi_letter = []
+        i = 0
+        while i < len(exts):
+            if i + 1 < len(exts) and exts[i] == 'z' and exts[i+1].isalpha():
+                # 找到多字母扩展（z 开头）
+                j = i
+                while j < len(exts) and exts[j].isalpha():
+                    j += 1
+                multi_letter.append(exts[i:j])
+                i = j
+            elif exts[i].isalpha() and exts[i].islower():
+                # 单字母扩展
+                single_letters.append(exts[i])
+                i += 1
+            else:
+                # 其他字符或已处理的多字母扩展
+                i += 1
+
+        # 构建扩展字符串
+        if single_letters and multi_letter:
+            # 两种都有：单字母在前，多字母用下划线连接
+            return f"{base}{''.join(single_letters)}_{'_'.join(multi_letter)}"
+        elif single_letters:
+            # 只有单字母扩展
+            return f"{base}{''.join(single_letters)}"
+        elif multi_letter:
+            # 只有多字母扩展
+            return f"{base}_{'_'.join(multi_letter)}"
+        else:
+            # 没有扩展
+            return base
 
     @property
     def mabi(self) -> str:

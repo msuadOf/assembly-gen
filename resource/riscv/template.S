@@ -3,10 +3,21 @@
 # 架构: RISC-V (xlen=${xlen}, ext=${ext})
 # 测试指令: ${test_ins}
 
+.section .bss
+.align 4
+.stack_frame:
+    .skip 64  # 预留 64 字节作为临时栈区域
+
 .section .text
 .globl _start
 
 _start:
+    # === 保存原始栈指针 ===
+    # 使用 x30 (t5) 作为临时寄存器保存 sp
+    # 然后设置一个安全的栈区域用于 CSR 初始化
+    mv t5, sp
+    la sp, .stack_frame + 60  # 指向栈区域顶部
+
     # === GPR 初始化 ===
     li x1, ${x1}
     li x2, ${x2}
@@ -37,14 +48,13 @@ _start:
     li x27, ${x27}
     li x28, ${x28}
     li x29, ${x29}
-    li x30, ${x30}
+    # x30 (t5) 保存了原始 sp，稍后恢复
     li x31, ${x31}
 
     # === CSR 初始化 ===
     # 使用 x31 (t6) 作为临时寄存器设置 CSR
     # 先保存 x31 的用户值到栈，使用后再恢复
-    addi sp, sp, -${xlen}
-    sd t6, 0(sp)
+    ${stack_store} t6, -${xlen_bytes}(sp)
 
     li t6, ${mstatus}
     csrw mstatus, t6
@@ -53,8 +63,10 @@ _start:
     csrw mepc, t6
 
     # 恢复 x31 的用户值
-    ld t6, 0(sp)
-    addi sp, sp, ${xlen}
+    ${stack_load} t6, -${xlen_bytes}(sp)
+
+    # 恢复原始栈指针
+    mv sp, t5
 
     # === 测试指令 ===
     ${test_ins}

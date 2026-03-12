@@ -407,18 +407,22 @@ class RISCV(GenericTarget):
         result = result.replace("${pretty_name}", pretty_name)
         result = result.replace("${xlen}", str(self.xlen))
 
-        # 构建用于元数据头部的扩展字符串
-        # 模板使用 CSR 指令（csrw mstatus, csrw mepc），现代工具链需要 zicsr 扩展
-        display_ext = self.ext
-        if display_ext:
-            # 检查是否已包含 zicsr（不区分大小写）
-            ext_lower = display_ext.lower()
-            if "zicsr" not in ext_lower:
-                # 添加 zicsr 扩展（模板使用 CSR 指令）
-                display_ext = display_ext + "zicsr"
+        # 添加栈操作相关的占位符
+        # xlen_bytes: 用于栈指针调整（4 或 8 字节）
+        # stack_store/stack_load: 用于保存/恢复寄存器（sw/lw 或 sd/ld）
+        xlen_bytes = self.xlen // 8
+        result = result.replace("${xlen_bytes}", str(xlen_bytes))
+        if self.xlen == 32:
+            result = result.replace("${stack_store}", "sw")
+            result = result.replace("${stack_load}", "lw")
         else:
-            # 空扩展时，添加 zicsr
-            display_ext = "zicsr"
+            result = result.replace("${stack_store}", "sd")
+            result = result.replace("${stack_load}", "ld")
+
+        # 构建用于元数据头部的扩展字符串
+        # 注意：CSR 指令在旧版工具链中是基本扩展的一部分
+        # 新版工具链可能需要 zicsr 扩展，但为了兼容性，不自动添加
+        display_ext = self.ext if self.ext else ""
         result = result.replace("${ext}", display_ext)
 
         # 第四步：检测残留的占位符或格式错误的占位符
