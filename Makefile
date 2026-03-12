@@ -131,7 +131,7 @@ compile-all: check-tools
 run:
 	@echo "生成汇编文件..."
 	@mkdir -p $(OUTPUT_DIR)
-	@$(PYTHON) $(MAIN_SCRIPT) --template $(DEFAULT_TEMPLATE) $(DEFAULT_JSON) --output_dir $(OUTPUT_DIR)
+	@$(PYTHON) $(MAIN_SCRIPT) --force-overwrite --template $(DEFAULT_TEMPLATE) $(DEFAULT_JSON) --output_dir $(OUTPUT_DIR)
 	@echo ""
 	@echo "编译汇编文件（从文件元数据读取配置）..."
 	@$(MAKE) --no-print-directory compile-all
