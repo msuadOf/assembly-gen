@@ -302,22 +302,34 @@ def find_toolchain() -> Dict[str, str]:
     if env_gcc or env_objcopy or env_objdump:
         has_env_override = True
 
-        # 设置 GCC（使用环境变量或自动检测）
+        # 验证环境变量覆盖指向有效的工具
+        # 如果环境变量指定的工具不存在，则忽略该覆盖并使用自动检测
         if env_gcc:
-            tools["gcc"] = env_gcc
+            if check_tool(env_gcc):
+                tools["gcc"] = env_gcc
+            else:
+                # 环境变量指定的工具不存在，使用自动检测
+                tools["gcc"] = check_riscv_gcc(env_gcc) or check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
+
         else:
             # 尝试自动检测 RISC-V gcc（避免原生 gcc）
             tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
 
         # 设置 objcopy（使用环境变量或自动检测）
         if env_objcopy:
-            tools["objcopy"] = env_objcopy
+            if check_tool(env_objcopy):
+                tools["objcopy"] = env_objcopy
+            else:
+                tools["objcopy"] = check_tool("riscv-objcopy") or check_tool("riscv32-unknown-elf-objcopy") or check_tool("riscv64-unknown-elf-objcopy") or check_tool("llvm-objcopy") or check_tool("objcopy")
         else:
             tools["objcopy"] = check_tool("riscv-objcopy") or check_tool("riscv32-unknown-elf-objcopy") or check_tool("riscv64-unknown-elf-objcopy") or check_tool("llvm-objcopy") or check_tool("objcopy")
 
         # 设置 objdump（使用环境变量或自动检测）
         if env_objdump:
-            tools["objdump"] = env_objdump
+            if check_tool(env_objdump):
+                tools["objdump"] = env_objdump
+            else:
+                tools["objdump"] = check_tool("riscv-objdump") or check_tool("riscv32-unknown-elf-objdump") or check_tool("riscv64-unknown-elf-objdump") or check_tool("llvm-objdump") or check_tool("objdump")
         else:
             tools["objdump"] = check_tool("riscv-objdump") or check_tool("riscv32-unknown-elf-objdump") or check_tool("riscv64-unknown-elf-objdump") or check_tool("llvm-objdump") or check_tool("objdump")
 

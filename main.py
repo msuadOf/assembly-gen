@@ -361,7 +361,26 @@ class RISCV(GenericTarget):
 
         # 检测是否为 RV32E（嵌入式基础 ISA）
         # RV32E 只有 16 个通用寄存器 (x0-x15)
-        self.is_rv32e = 'e' in self.ext.lower()
+        # 注意：只有当 'e' 是单字母扩展时才是 RV32E，不是多字母扩展的一部分
+        ext_lower = self.ext.lower()
+        if ext_lower:
+            # 先按下划线分割
+            ext_tokens = ext_lower.split('_')
+            # 检查是否有单字母 'e' token
+            has_single_e = 'e' in ext_tokens
+            # 如果没有下划线分隔符，还需要检查连接格式（如 EC → e, c）
+            if not has_single_e and '_' not in ext_lower:
+                # 连接格式，检查是否包含独立的 'e' 字符
+                for char in ext_lower:
+                    if char == 'e':
+                        has_single_e = True
+                        break
+                    elif char.isalpha():
+                        # 遇到其他字母后，e 必须在之前出现才算
+                        continue
+            self.is_rv32e = has_single_e
+        else:
+            self.is_rv32e = False
 
         # 构建 ISA 状态表（GPR + CSR）
         # RV32E 只有 x0-x15，其他架构有 x0-x31
