@@ -1156,10 +1156,10 @@ class TestCompileVerification(unittest.TestCase):
         import tempfile
         import json
 
-        # 首先验证模板文件包含 li x30, ${x30} 占位符
+        # 首先验证模板文件包含 x30 恢复相关的占位符
         template_content = Path("resource/riscv/template.S").read_text()
-        self.assertIn("li x30, ${x30}", template_content,
-                     "模板应包含 'li x30, ${x30}' 占位符")
+        self.assertIn("${x30_restore_instruction}", template_content,
+                     "模板应包含 '${x30_restore_instruction}' 占位符")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # 创建测试用例，指定 x30 的值

@@ -33,7 +33,9 @@ class CompilerConfig:
     """编译器配置。"""
 
     # RISC-V 扩展的标准顺序
-    EXTENSION_ORDER = "imafdlutcvhbzgsxky"
+    # 注意：e (嵌入式基础 ISA) 必须排在第一位，i 排在第二位
+    # GCC 要求第一个 ISA 子集必须是 'e', 'i' 或 'g'
+    EXTENSION_ORDER = "eimafdlutcvhbzgsxky"
 
     # 已知的多字母扩展列表（用于解析）
     KNOWN_MULTI_LETTER_EXTENSIONS = [
@@ -217,8 +219,17 @@ class CompilerConfig:
 
     @property
     def mabi(self) -> str:
-        """生成 -mabi 参数。"""
-        return "ilp32" if self.xlen == 32 else "lp64"
+        """生成 -mabi 参数。
+
+        对于 RV32E，必须使用 ilp32e ABI。
+        """
+        if self.xlen == 32:
+            # 检查是否为 RV32E（嵌入式基础 ISA）
+            if 'e' in self._single_exts:
+                return "ilp32e"
+            return "ilp32"
+        else:
+            return "lp64"
 
 
 def find_toolchain() -> Dict[str, str]:

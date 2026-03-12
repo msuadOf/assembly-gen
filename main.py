@@ -359,8 +359,16 @@ class RISCV(GenericTarget):
 
         self.ext = self.arch.get("ext", "")
 
+        # 检测是否为 RV32E（嵌入式基础 ISA）
+        # RV32E 只有 16 个通用寄存器 (x0-x15)
+        self.is_rv32e = 'e' in self.ext.lower()
+
         # 构建 ISA 状态表（GPR + CSR）
-        self.gprs = [f"x{i}" for i in range(32)]
+        # RV32E 只有 x0-x15，其他架构有 x0-x31
+        if self.is_rv32e:
+            self.gprs = [f"x{i}" for i in range(16)]
+        else:
+            self.gprs = [f"x{i}" for i in range(32)]
 
     def parse_template(self, template: str) -> str:
         """
@@ -422,6 +430,89 @@ class RISCV(GenericTarget):
         else:
             result = result.replace("${stack_store}", "sd")
             result = result.replace("${stack_load}", "ld")
+
+        # 获取已替换的 CSR 值（从 placeholder_map 中获取）
+        mstatus_val = placeholder_map.get("${mstatus}", "0x00000000")
+        mepc_val = placeholder_map.get("${mepc}", "0x00000000")
+        x30_val = placeholder_map.get("${x30}", "0x00000000")
+        x31_val = placeholder_map.get("${x31}", "0x00000000")
+
+        # RV32E 特殊处理
+        # RV32E 只有 16 个通用寄存器 (x0-x15)，不能使用 x16-x31
+        # 使用 s0/s1 作为 scratch 寄存器，而不是 t5/t6 (x30/x31)
+        if self.is_rv32e:
+            # 使用 s0 (x8) 保存原始 sp
+            result = result.replace("${sp_save_comment}",
+                "# 使用 x8 (s0) 作为临时寄存器保存 sp")
+            result = result.replace("${sp_save_instruction}",
+                "# 然后设置一个安全的栈区域用于 CSR 初始化")
+            result = result.replace("${sp_save_move}",
+                "mv s0, sp\n    la sp, .stack_frame + 64")
+            result = result.replace("${gpr_init_x16_x31}", "")
+            result = result.replace("${x30_comment}",
+                "# x8 (s0) 保存了原始 sp，稍后恢复")
+            # RV32E: x31 不存在
+            result = result.replace("${x31_init}", "# RV32E: x31 不存在")
+            # 使用 s1 (x9) 作为 CSR 初始化的 scratch 寄存器
+            result = result.replace("${csr_scratch_comment}",
+                "# 使用 x9 (s1) 作为临时寄存器设置 CSR\n    # 先保存 s1 的用户值到栈，使用后再恢复")
+            stack_store_op = "sw" if self.xlen == 32 else "sd"
+            stack_load_op = "lw" if self.xlen == 32 else "ld"
+            result = result.replace("${csr_scratch_save}",
+                f"{stack_store_op} s1, -{xlen_bytes}(sp)")
+            result = result.replace("${csr_init_mstatus}",
+                f"li s1, {mstatus_val}\n    csrw mstatus, s1")
+            result = result.replace("${csr_init_mepc}",
+                f"li s1, {mepc_val}\n    csrw mepc, s1")
+            result = result.replace("${csr_scratch_restore}",
+                f"{stack_load_op} s1, -{xlen_bytes}(sp)")
+            result = result.replace("${sp_restore_move}",
+                "mv sp, s0")
+            result = result.replace("${x30_restore_comment}",
+                "# RV32E: x30 不存在，无需恢复")
+            result = result.replace("${x30_restore_instruction}",
+                "# RV32E 不支持 x30")
+        else:
+            # 使用 t5 (x30) 保存原始 sp
+            result = result.replace("${sp_save_comment}",
+                "# 使用 x30 (t5) 作为临时寄存器保存 sp")
+            result = result.replace("${sp_save_instruction}",
+                "# 然后设置一个安全的栈区域用于 CSR 初始化")
+            result = result.replace("${sp_save_move}",
+                "mv t5, sp\n    la sp, .stack_frame + 64")
+            # x16-x31 初始化
+            x16_31_init = []
+            for i in range(16, 32):
+                if i == 30:  # x30 (t5) 用于保存 sp
+                    x16_31_init.append(f"    # x30 (t5) 保存了原始 sp，稍后恢复")
+                elif i == 31:
+                    x16_31_init.append(f"    li x31, {x31_val}")
+                else:
+                    x16_31_init.append(f"    li x{i}, {placeholder_map.get(f'${{x{i}}}', '0x00000000')}")
+            result = result.replace("${gpr_init_x16_x31}", "\n".join(x16_31_init))
+            result = result.replace("${x30_comment}",
+                "# x30 (t5) 保存了原始 sp，稍后恢复")
+            # x31 初始化
+            result = result.replace("${x31_init}", f"li x31, {x31_val}")
+            # 使用 t6 (x31) 作为 CSR 初始化的 scratch 寄存器
+            result = result.replace("${csr_scratch_comment}",
+                "# 使用 x31 (t6) 作为临时寄存器设置 CSR\n    # 先保存 x31 的用户值到栈，使用后再恢复")
+            stack_store_op = "sw" if self.xlen == 32 else "sd"
+            stack_load_op = "lw" if self.xlen == 32 else "ld"
+            result = result.replace("${csr_scratch_save}",
+                f"{stack_store_op} t6, -{xlen_bytes}(sp)")
+            result = result.replace("${csr_init_mstatus}",
+                f"li t6, {mstatus_val}\n    csrw mstatus, t6")
+            result = result.replace("${csr_init_mepc}",
+                f"li t6, {mepc_val}\n    csrw mepc, t6")
+            result = result.replace("${csr_scratch_restore}",
+                f"{stack_load_op} t6, -{xlen_bytes}(sp)")
+            result = result.replace("${sp_restore_move}",
+                "mv sp, t5")
+            result = result.replace("${x30_restore_comment}",
+                "# === 设置 x30 (t5) ===\n    # 恢复 x30 的用户值（之前用于保存原始 sp，现已完成恢复）")
+            result = result.replace("${x30_restore_instruction}",
+                f"li x30, {x30_val}")
 
         # 构建用于元数据头部的扩展字符串
         # 注意：CSR 指令在旧版工具链中是基本扩展的一部分
