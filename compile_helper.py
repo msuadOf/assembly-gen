@@ -258,11 +258,11 @@ def find_toolchain() -> Dict[str, str]:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
 
-    # 检查是否为 RISC-V gcc（排除原生 gcc）
+    # 检查是否为有效的 RISC-V 编译器（RISC-V gcc 或 clang）
     def check_riscv_gcc(name: str) -> Optional[str]:
-        """检查是否为 RISC-V gcc，并测试其是否能处理 RISC-V 选项。"""
+        """检查是否为 RISC-V gcc 或 clang，并测试其是否能处理 RISC-V 选项。"""
         try:
-            # 首先检查是否为 gcc
+            # 首先检查是否为 gcc/clang
             result = subprocess.run(
                 [name, "--version"],
                 capture_output=True,
@@ -272,20 +272,34 @@ def find_toolchain() -> Dict[str, str]:
             if result.returncode != 0:
                 return None
 
-            # 检查是否包含 riscv 标识
-            if "riscv" not in result.stdout.lower() and "riscv" not in result.stderr.lower():
+            version_output = (result.stdout + " " + result.stderr).lower()
+
+            # 检查是否为 RISC-V 特定的 gcc（包含 riscv 标识）
+            is_riscv_gcc = "riscv" in version_output
+
+            # 检查是否为 clang（clang 通过 -target 选项支持 RISC-V）
+            is_clang = "clang" in version_output
+
+            # 排除原生 x86 gcc（既不是 RISC-V gcc 也不是 clang）
+            if not is_riscv_gcc and not is_clang:
                 return None
 
-            # 验证能处理 RISC-V 选项（尝试编译空程序）
-            test_result = subprocess.run(
-                [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            # 如果成功或只输出警告而非错误，则认为是有效的 RISC-V gcc
-            if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
+            # 对于 RISC-V gcc，验证能处理 RISC-V 选项
+            if is_riscv_gcc:
+                test_result = subprocess.run(
+                    [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if test_result.returncode == 0 or "warning:" in test_result.stderr.lower():
+                    return name
+                return None
+
+            # 对于 clang，验证可用性（clang 可以通过 -target riscv32/riscv64 编译）
+            if is_clang:
                 return name
+
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
 
@@ -302,18 +316,24 @@ def find_toolchain() -> Dict[str, str]:
     if env_gcc or env_objcopy or env_objdump:
         has_env_override = True
 
-        # 验证环境变量覆盖指向有效的工具
-        # 如果环境变量指定的工具不存在，则忽略该覆盖并使用自动检测
+        # 验证环境变量覆盖指向有效的 RISC-V 工具
+        # 如果环境变量指定的工具不是 RISC-V 工具，则忽略该覆盖并使用自动检测
         if env_gcc:
-            if check_tool(env_gcc):
+            # 使用 check_riscv_gcc 验证是 RISC-V gcc（不只是任何 gcc）
+            riscv_gcc = check_riscv_gcc(env_gcc)
+            if riscv_gcc:
                 tools["gcc"] = env_gcc
             else:
-                # 环境变量指定的工具不存在，使用自动检测
-                tools["gcc"] = check_riscv_gcc(env_gcc) or check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
+                # 环境变量指定的不是 RISC-V gcc，使用自动检测
+                tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
 
         else:
             # 尝试自动检测 RISC-V gcc（避免原生 gcc）
             tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
+
+        # 如果自动检测失败，尝试通用工具链作为最后回退
+        if not tools.get("gcc"):
+            tools["gcc"] = check_tool("gcc") or check_tool("clang")
 
         # 设置 objcopy（使用环境变量或自动检测）
         if env_objcopy:

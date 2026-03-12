@@ -38,10 +38,28 @@ ${gpr_init_x16_x31}
 ${x31_init}
 
     # === CSR 初始化 ===
-    # ${csr_scratch_comment}
-    ${csr_scratch_save}
-${csr_init_block}
-    ${csr_scratch_restore}
+    # 保存 scratch 寄存器到栈
+    ${scratch_reg_save}
+
+    # 初始化各个 CSR（占位符由 Python 替换为实际值）
+    li ${scratch_reg}, ${mstatus}
+    csrw mstatus, ${scratch_reg}
+
+    li ${scratch_reg}, ${mepc}
+    csrw mepc, ${scratch_reg}
+
+    # 可选 CSR 初始化（如果 JSON 中指定了其他 CSR，可以在模板中扩展）
+    # li ${scratch_reg}, ${mtvec}
+    # csrw mtvec, ${scratch_reg}
+    # li ${scratch_reg}, ${mcause}
+    # csrw mcause, ${scratch_reg}
+    # li ${scratch_reg}, ${satp}
+    # csrw satp, ${scratch_reg}
+    # li ${scratch_reg}, ${mtval}
+    # csrw mtval, ${scratch_reg}
+
+    # 恢复 scratch 寄存器
+    ${scratch_reg_restore}
 
     # 恢复原始栈指针
     ${sp_restore_move}

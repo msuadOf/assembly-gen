@@ -360,27 +360,23 @@ class RISCV(GenericTarget):
         self.ext = self.arch.get("ext", "")
 
         # 检测是否为 RV32E（嵌入式基础 ISA）
-        # RV32E 只有 16 个通用寄存器 (x0-x15)
-        # 注意：只有当 'e' 是单字母扩展时才是 RV32E，不是多字母扩展的一部分
-        ext_lower = self.ext.lower()
-        if ext_lower:
-            # 先按下划线分割
-            ext_tokens = ext_lower.split('_')
-            # 检查是否有单字母 'e' token
-            has_single_e = 'e' in ext_tokens
-            # 如果没有下划线分隔符，还需要检查连接格式（如 EC → e, c）
-            if not has_single_e and '_' not in ext_lower:
-                # 连接格式，检查是否包含独立的 'e' 字符
-                for char in ext_lower:
-                    if char == 'e':
-                        has_single_e = True
-                        break
-                    elif char.isalpha():
-                        # 遇到其他字母后，e 必须在之前出现才算
-                        continue
-            self.is_rv32e = has_single_e
-        else:
-            self.is_rv32e = False
+        # RV32E 只有 16 个通用寄存器 (x0-x15)，且仅存在于 RV32
+        # RV32E 使用 'e' 作为基础 ISA 代替 'i'
+        # 关键：只有当 'e' 是基础 ISA（第一个扩展）时才是 RV32E
+        self.is_rv32e = False
+        if self.xlen == 32:
+            ext_lower = self.ext.lower()
+            if ext_lower:
+                # 先检查下划线分隔的格式
+                ext_tokens = ext_lower.split('_')
+                # 第一个 token 是基础 ISA
+                if ext_tokens[0] == 'e':
+                    self.is_rv32e = True
+                # 如果没有下划线，检查第一个字符是否为 'e'
+                elif '_' not in ext_lower and ext_lower[0] == 'e':
+                    self.is_rv32e = True
+                # 注意：多字母扩展中的 'e'（如 zifencei）不是基础 ISA
+                # 不会被误判为 RV32E
 
         # 构建 ISA 状态表（GPR + CSR）
         # RV32E 只有 x0-x15，其他架构有 x0-x31
@@ -433,7 +429,9 @@ class RISCV(GenericTarget):
             result = result.replace(placeholder, value)
 
         # 第三步：替换测试指令和架构元数据占位符
-        pretty_name = self.arch.get("pretty-name", f"rv{self.xlen}d")
+        # 默认 pretty-name 使用 imac（I+M+A+C 扩展），避免不同扩展的测试用例文件名冲突
+        default_pretty = f"rv{self.xlen}imac"
+        pretty_name = self.arch.get("pretty-name", default_pretty)
         result = result.replace("${test_ins}", self.test_ins)
         result = result.replace("${pretty_name}", pretty_name)
         result = result.replace("${xlen}", str(self.xlen))
@@ -450,11 +448,7 @@ class RISCV(GenericTarget):
             result = result.replace("${stack_store}", "sd")
             result = result.replace("${stack_load}", "ld")
 
-        # 获取已替换的 CSR 值（从 placeholder_map 中获取）
-        # 需要为所有指定的 CSR 生成初始化代码
-        csr_values = self.isa_state.get("csrs", {})
-        mstatus_val = placeholder_map.get("${mstatus}", "0x00000000")
-        mepc_val = placeholder_map.get("${mepc}", "0x00000000")
+        # 获取 x30 和 x31 的用户值（需要在 GPR 初始化后恢复）
         x30_val = placeholder_map.get("${x30}", "0x00000000")
         x31_val = placeholder_map.get("${x31}", "0x00000000")
 
@@ -463,6 +457,7 @@ class RISCV(GenericTarget):
         # 使用 s0/s1 作为 scratch 寄存器，而不是 t5/t6 (x30/x31)
         if self.is_rv32e:
             scratch_reg = "s1"  # x9
+            sp_save_reg = "s0"  # x8
             # 使用 s0 (x8) 保存原始 sp
             result = result.replace("${sp_save_comment}",
                 "# 使用 x8 (s0) 作为临时寄存器保存 sp")
@@ -475,40 +470,14 @@ class RISCV(GenericTarget):
                 "# x8 (s0) 保存了原始 sp，稍后恢复")
             # RV32E: x31 不存在
             result = result.replace("${x31_init}", "# RV32E: x31 不存在")
-            # 使用 s1 (x9) 作为 CSR 初始化的 scratch 寄存器
-            result = result.replace("${csr_scratch_comment}",
-                "# 使用 x9 (s1) 作为临时寄存器设置 CSR\n    # 先保存 s1 的用户值到栈，使用后再恢复")
-            stack_store_op = "sw" if self.xlen == 32 else "sd"
-            stack_load_op = "lw" if self.xlen == 32 else "ld"
-            result = result.replace("${csr_scratch_save}",
-                f"{stack_store_op} s1, -{xlen_bytes}(sp)")
-
-            # 生成 CSR 初始化块（使用 s1 作为 scratch）
-            csr_init_lines = []
-            for csr_name in sorted(csr_values.keys()):
-                csr_val = placeholder_map.get(f"${{{csr_name}}}", "0x00000000")
-                csr_init_lines.append(f"    li s1, {csr_val}")
-                csr_init_lines.append(f"    csrw {csr_name}, s1")
-
-            # 如果没有指定任何 CSR，至少初始化 mstatus 和 mepc
-            if not csr_init_lines:
-                csr_init_lines.append(f"    li s1, {mstatus_val}")
-                csr_init_lines.append("    csrw mstatus, s1")
-                csr_init_lines.append(f"    li s1, {mepc_val}")
-                csr_init_lines.append("    csrw mepc, s1")
-
-            csr_init_block = "\n".join(csr_init_lines)
-            result = result.replace("${csr_init_block}", csr_init_block)
-            result = result.replace("${csr_scratch_restore}",
-                f"{stack_load_op} s1, -{xlen_bytes}(sp)")
-            result = result.replace("${sp_restore_move}",
-                "mv sp, s0")
+            result = result.replace("${sp_restore_move}", "mv sp, s0")
             result = result.replace("${x30_restore_comment}",
                 "# RV32E: x30 不存在，无需恢复")
             result = result.replace("${x30_restore_instruction}",
                 "# RV32E 不支持 x30")
         else:
             scratch_reg = "t6"  # x31
+            sp_save_reg = "t5"  # x30
             # 使用 t5 (x30) 保存原始 sp
             result = result.replace("${sp_save_comment}",
                 "# 使用 x30 (t5) 作为临时寄存器保存 sp")
@@ -530,38 +499,25 @@ class RISCV(GenericTarget):
                 "# x30 (t5) 保存了原始 sp，稍后恢复")
             # x31 初始化
             result = result.replace("${x31_init}", f"li x31, {x31_val}")
-            # 使用 t6 (x31) 作为 CSR 初始化的 scratch 寄存器
-            result = result.replace("${csr_scratch_comment}",
-                "# 使用 x31 (t6) 作为临时寄存器设置 CSR\n    # 先保存 x31 的用户值到栈，使用后再恢复")
-            stack_store_op = "sw" if self.xlen == 32 else "sd"
-            stack_load_op = "lw" if self.xlen == 32 else "ld"
-            result = result.replace("${csr_scratch_save}",
-                f"{stack_store_op} t6, -{xlen_bytes}(sp)")
-
-            # 生成 CSR 初始化块（使用 t6 作为 scratch）
-            csr_init_lines = []
-            for csr_name in sorted(csr_values.keys()):
-                csr_val = placeholder_map.get(f"${{{csr_name}}}", "0x00000000")
-                csr_init_lines.append(f"    li t6, {csr_val}")
-                csr_init_lines.append(f"    csrw {csr_name}, t6")
-
-            # 如果没有指定任何 CSR，至少初始化 mstatus 和 mepc
-            if not csr_init_lines:
-                csr_init_lines.append(f"    li t6, {mstatus_val}")
-                csr_init_lines.append("    csrw mstatus, t6")
-                csr_init_lines.append(f"    li t6, {mepc_val}")
-                csr_init_lines.append("    csrw mepc, t6")
-
-            csr_init_block = "\n".join(csr_init_lines)
-            result = result.replace("${csr_init_block}", csr_init_block)
-            result = result.replace("${csr_scratch_restore}",
-                f"{stack_load_op} t6, -{xlen_bytes}(sp)")
-            result = result.replace("${sp_restore_move}",
-                "mv sp, t5")
+            result = result.replace("${sp_restore_move}", "mv sp, t5")
             result = result.replace("${x30_restore_comment}",
                 "# === 设置 x30 (t5) ===\n    # 恢复 x30 的用户值（之前用于保存原始 sp，现已完成恢复）")
             result = result.replace("${x30_restore_instruction}",
                 f"li x30, {x30_val}")
+
+        # CSR 初始化相关占位符替换（所有汇编代码在 template.S 中）
+        # scratch 寄存器名称（s1 for RV32E, t6 for RV32I）
+        result = result.replace("${scratch_reg}", scratch_reg)
+
+        # scratch 寄存器保存/恢复指令
+        stack_store_op = "sw" if self.xlen == 32 else "sd"
+        stack_load_op = "lw" if self.xlen == 32 else "ld"
+        result = result.replace("${scratch_reg_save}", f"{stack_store_op} {scratch_reg}, -{xlen_bytes}(sp)")
+        result = result.replace("${scratch_reg_restore}", f"{stack_load_op} {scratch_reg}, -{xlen_bytes}(sp)")
+
+        # CSR 值占位符替换（使用 JSON 中的值，默认 0x00000000）
+        result = result.replace("${mstatus}", placeholder_map.get("${mstatus}", "0x00000000"))
+        result = result.replace("${mepc}", placeholder_map.get("${mepc}", "0x00000000"))
 
         # 构建用于元数据头部的扩展字符串
         # 注意：CSR 指令在旧版工具链中是基本扩展的一部分
@@ -813,7 +769,8 @@ def process_test_cases(
                 normalized_ext = ext.lower().replace("_", "")
                 pretty_name = f"rv{target.xlen}{normalized_ext}"
             else:
-                pretty_name = f"rv{target.xlen}d"
+                # 使用实际的默认扩展 IMAC
+                pretty_name = f"rv{target.xlen}imac"
         test_ins = test_case["test-ins"]
         filename = generate_output_filename(pretty_name, test_ins)
         output_file = output_path / filename
