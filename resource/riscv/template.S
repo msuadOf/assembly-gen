@@ -25,7 +25,8 @@ _start:
     li x5, ${x5}
     li x6, ${x6}
     li x7, ${x7}
-    li x8, ${x8}
+    # ${x8_init}
+${x8_init}
     li x9, ${x9}
     li x10, ${x10}
     li x11, ${x11}
@@ -48,21 +49,36 @@ ${x31_init}
     li ${scratch_reg}, ${mepc}
     csrw mepc, ${scratch_reg}
 
-    # 可选 CSR 初始化（如果 JSON 中指定了其他 CSR，可以在模板中扩展）
-    # li ${scratch_reg}, ${mtvec}
-    # csrw mtvec, ${scratch_reg}
-    # li ${scratch_reg}, ${mcause}
-    # csrw mcause, ${scratch_reg}
-    # li ${scratch_reg}, ${satp}
-    # csrw satp, ${scratch_reg}
-    # li ${scratch_reg}, ${mtval}
-    # csrw mtval, ${scratch_reg}
+    # 其他 CSR 初始化（如果 JSON 中指定了值，则初始化）
+    # 注意：即使 JSON 中未指定，这些 CSR 也会被初始化为默认值 0x00000000
+    li ${scratch_reg}, ${mtvec}
+    csrw mtvec, ${scratch_reg}
+
+    li ${scratch_reg}, ${mcause}
+    csrw mcause, ${scratch_reg}
+
+    li ${scratch_reg}, ${mtval}
+    csrw mtval, ${scratch_reg}
+
+    li ${scratch_reg}, ${mip}
+    csrw mip, ${scratch_reg}
+
+    li ${scratch_reg}, ${mie}
+    csrw mie, ${scratch_reg}
+
+    # satp 需要特殊处理（可能未实现，取决于平台）
+    li ${scratch_reg}, ${satp}
+    csrw satp, ${scratch_reg}
 
     # 恢复 scratch 寄存器
     ${scratch_reg_restore}
 
     # 恢复原始栈指针
     ${sp_restore_move}
+
+    # === 恢复用于保存 sp 的寄存器 ===
+    # ${x8_restore_comment}
+    ${x8_restore_instruction}
 
     # === 设置 x2 (sp) ===
     # 在所有栈操作完成后设置 x2，确保测试指令执行时 x2 有正确的值

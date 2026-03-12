@@ -470,7 +470,15 @@ class RISCV(GenericTarget):
                 "# x8 (s0) 保存了原始 sp，稍后恢复")
             # RV32E: x31 不存在
             result = result.replace("${x31_init}", "# RV32E: x31 不存在")
+            # RV32E: x8 (s0) 用于保存原始 sp，不在 GPR 初始化时设置
+            # 用户指定的 x8 值将在恢复 sp 后设置
+            x8_val = placeholder_map.get("${x8}", "0x00000000")
+            result = result.replace("${x8_init}", f"# x8 (s0) 保存了原始 sp，跳过初始化")
             result = result.replace("${sp_restore_move}", "mv sp, s0")
+            result = result.replace("${x8_restore_comment}",
+                "# === 恢复 x8 (s0) ===\n    # 恢复 x8 的用户值（之前用于保存原始 sp，现已完成恢复）")
+            result = result.replace("${x8_restore_instruction}",
+                f"li x8, {x8_val}")
             result = result.replace("${x30_restore_comment}",
                 "# RV32E: x30 不存在，无需恢复")
             result = result.replace("${x30_restore_instruction}",
@@ -504,6 +512,13 @@ class RISCV(GenericTarget):
                 "# === 设置 x30 (t5) ===\n    # 恢复 x30 的用户值（之前用于保存原始 sp，现已完成恢复）")
             result = result.replace("${x30_restore_instruction}",
                 f"li x30, {x30_val}")
+            # RV32I: x8 在 GPR 初始化时正常设置，无需后续恢复
+            x8_val = placeholder_map.get("${x8}", "0x00000000")
+            result = result.replace("${x8_init}", f"li x8, {x8_val}")
+            result = result.replace("${x8_restore_comment}",
+                "# RV32I: x8 在 GPR 初始化时已设置，无需恢复")
+            result = result.replace("${x8_restore_instruction}",
+                "# RV32I: x8 已初始化")
 
         # CSR 初始化相关占位符替换（所有汇编代码在 template.S 中）
         # scratch 寄存器名称（s1 for RV32E, t6 for RV32I）

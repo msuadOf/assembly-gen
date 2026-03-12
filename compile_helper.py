@@ -297,8 +297,28 @@ def find_toolchain() -> Dict[str, str]:
                 return None
 
             # 对于 clang，验证可用性（clang 可以通过 -target riscv32/riscv64 编译）
+            # 需要实际测试 clang 是否支持 RISC-V 后端（某些 clang 构建不包含）
             if is_clang:
-                return name
+                # 测试 clang 是否支持 RISC-V target
+                test_result = subprocess.run(
+                    [name, "-target", "riscv32", "-march=rv32i", "-c", "-x", "assembler", "-"],
+                    input="",  # 空输入
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                # 如果成功或只有警告，则认为 clang 支持 RISC-V
+                # 如果失败且输出包含 "unknown target" 或 "unknown CPU"，则不支持
+                if test_result.returncode == 0:
+                    return name
+                # 检查错误消息是否表明不支持 RISC-V
+                error_msg = (test_result.stderr + test_result.stdout).lower()
+                if "unknown target" in error_msg or "unknown cpu" in error_msg or "error: unknown triple" in error_msg:
+                    return None  # clang 不支持 RISC-V
+                # 其他错误（可能是警告），仍然接受
+                if "warning:" in error_msg or test_result.returncode == 0:
+                    return name
+                return None  # 其他错误，保守起见拒绝
 
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return None
