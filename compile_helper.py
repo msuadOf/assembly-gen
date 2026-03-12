@@ -35,115 +35,176 @@ class CompilerConfig:
     # RISC-V 扩展的标准顺序
     EXTENSION_ORDER = "imafdlutcvhbzgsxky"
 
+    # 已知的多字母扩展列表（用于解析）
+    KNOWN_MULTI_LETTER_EXTENSIONS = [
+        "zicsr", "zifencei", "zba", "zbb", "zbc", "zbs",
+        "zfh", "zfhmin", "zdinx", "zfinx", "zhinx",
+        "zkn", "zks", "zkt", "zve32f", "zve64d"
+    ]
+
     def __init__(self, xlen: int, extensions: str = ""):
         """
         初始化编译器配置。
 
         Args:
             xlen: 位宽 (32 或 64)
-            extensions: 扩展集 (如 "IMACFD")
+            extensions: 扩展集 (如 "IMACFD", "I_zicsr_zifencei")
         """
         self.xlen = xlen
         self.raw_extensions = extensions
+        # 解析并缓存扩展列表
+        self._single_exts, self._multi_exts = self._parse_extensions()
+
+    def _parse_extensions(self) -> tuple:
+        """解析扩展字符串，返回 (单字母扩展列表, 多字母扩展列表)。
+
+        使用基于 token 的解析，确保多字母扩展被正确识别和保留。
+        """
+        if not self.raw_extensions:
+            return (['i', 'm', 'a', 'c'], [])  # 默认扩展
+
+        # 转为小写
+        exts = self.raw_extensions.lower()
+
+        # 先按下划线分割
+        tokens = exts.split('_')
+
+        single_exts = []
+        multi_exts = []
+
+        for token in tokens:
+            if not token:
+                continue
+
+            # 检查是否为已知的多字母扩展
+            if token in self.KNOWN_MULTI_LETTER_EXTENSIONS:
+                multi_exts.append(token)
+            elif len(token) > 1 and token[0] == 'z':
+                # 未知的多字母扩展（z 开头），尝试匹配已知扩展
+                matched = False
+                for known in self.KNOWN_MULTI_LETTER_EXTENSIONS:
+                    if token.startswith(known):
+                        multi_exts.append(known)
+                        # 处理剩余部分
+                        remaining = token[len(known):]
+                        if remaining:
+                            # 递归处理剩余部分
+                            remaining_single, remaining_multi = CompilerConfig(
+                                self.xlen, remaining
+                            )._parse_extensions()
+                            single_exts.extend(remaining_single)
+                            multi_exts.extend(remaining_multi)
+                        matched = True
+                        break
+                if not matched:
+                    # 无法识别的 z 开头扩展，按单字母处理
+                    for ch in token:
+                        if ch.isalpha():
+                            single_exts.append(ch)
+            else:
+                # 单字母扩展或无分隔符的多字母扩展组合
+                i = 0
+                while i < len(token):
+                    # 检查是否为已知的多字母扩展（从当前位置开始）
+                    matched_multi = False
+                    for known in sorted(self.KNOWN_MULTI_LETTER_EXTENSIONS, key=len, reverse=True):
+                        if token[i:].startswith(known):
+                            multi_exts.append(known)
+                            i += len(known)
+                            matched_multi = True
+                            break
+                    if matched_multi:
+                        continue
+
+                    # 单字母扩展
+                    if token[i].isalpha():
+                        single_exts.append(token[i])
+                    i += 1
+
+        # 去重并保持顺序
+        seen_single = set()
+        unique_single = []
+        for ext in single_exts:
+            if ext not in seen_single:
+                unique_single.append(ext)
+                seen_single.add(ext)
+
+        seen_multi = set()
+        unique_multi = []
+        for ext in multi_exts:
+            if ext not in seen_multi:
+                unique_multi.append(ext)
+                seen_multi.add(ext)
+
+        return (unique_single, unique_multi)
 
     @property
     def ordered_extensions(self) -> str:
         """返回按标准顺序排序的扩展字符串。
 
-        处理标准单字母扩展（i, m, a, f, d, c）和多字母扩展（如 zicsr, zifencei）。
-        多字母扩展以 'z' 开头，必须保持完整。
+        注意：此属性返回扁平化的字符串，不适用于多个多字母扩展的格式化。
+        请使用 march 属性获取正确的 -march 字符串。
         """
-        if not self.raw_extensions:
-            return "imac"  # 默认扩展
-
-        # 转为小写
-        exts = self.raw_extensions.lower()
-
-        # 解析扩展：分离单字母扩展和多字母扩展（z 开头）
-        parsed = []
-        i = 0
-        while i < len(exts):
-            if exts[i] == 'z' and i + 1 < len(exts) and exts[i+1].isalpha():
-                # z 开头且后面还有字母，解析多字母扩展
-                j = i
-                while j < len(exts) and exts[j].isalpha():
-                    j += 1
-                # z 开头的多字母扩展至少需要 2 个字符
-                parsed.append(exts[i:j])
-                i = j
-            else:
-                # 单字母扩展
-                parsed.append(exts[i])
-                i += 1
-
-        # 确保基本扩展存在
-        single_letters = ''.join([e for e in parsed if len(e) == 1])
-        if 'i' not in single_letters and 'e' not in single_letters:
-            parsed.insert(0, 'i')
-            single_letters += 'i'
-
         # 按标准顺序排序单字母扩展
-        ordered = []
+        ordered_single = []
         added = set()
         for e in self.EXTENSION_ORDER:
-            if e in single_letters and e not in added:
-                ordered.append(e)
+            if e in self._single_exts and e not in added:
+                ordered_single.append(e)
                 added.add(e)
 
         # 添加不在标准列表中的单字母扩展
-        for e in single_letters:
+        for e in self._single_exts:
             if e not in added:
-                ordered.append(e)
+                ordered_single.append(e)
                 added.add(e)
 
-        # 添加多字母扩展（保持原始顺序，放在单字母扩展之后）
-        for ext in parsed:
-            if len(ext) > 1 and ext not in added:
-                ordered.append(ext)
-                added.add(ext)
+        # 确保基本扩展存在
+        if 'i' not in added and 'e' not in added:
+            ordered_single.insert(0, 'i')
 
-        return ''.join(ordered)
+        # 合并单字母和多字母扩展
+        return ''.join(ordered_single) + ''.join(self._multi_exts)
 
     @property
     def march(self) -> str:
         """生成 -march 参数。
 
         RISC-V ISA 规范：单字母扩展直接连接，多字母扩展用下划线分隔。
-        例如: rv32imafdc, rv32i_zicsr, rv32imafdc_zicsr
+        例如: rv32imafdc, rv32i_zicsr, rv32imafdc_zicsr_zifencei
         """
         base = "rv32" if self.xlen == 32 else "rv64"
-        exts = self.ordered_extensions
 
-        # 分离单字母和多字母扩展
-        single_letters = []
-        multi_letter = []
-        i = 0
-        while i < len(exts):
-            if i + 1 < len(exts) and exts[i] == 'z' and exts[i+1].isalpha():
-                # 找到多字母扩展（z 开头）
-                j = i
-                while j < len(exts) and exts[j].isalpha():
-                    j += 1
-                multi_letter.append(exts[i:j])
-                i = j
-            elif exts[i].isalpha() and exts[i].islower():
-                # 单字母扩展
-                single_letters.append(exts[i])
-                i += 1
-            else:
-                # 其他字符或已处理的多字母扩展
-                i += 1
+        # 按标准顺序排序单字母扩展
+        ordered_single = []
+        added = set()
+        for e in self.EXTENSION_ORDER:
+            if e in self._single_exts and e not in added:
+                ordered_single.append(e)
+                added.add(e)
+
+        # 添加不在标准列表中的单字母扩展
+        for e in self._single_exts:
+            if e not in added:
+                ordered_single.append(e)
+                added.add(e)
+
+        # 确保基本扩展存在
+        if 'i' not in added and 'e' not in added:
+            ordered_single.insert(0, 'i')
 
         # 构建扩展字符串
-        if single_letters and multi_letter:
+        single_str = ''.join(ordered_single)
+
+        if single_str and self._multi_exts:
             # 两种都有：单字母在前，多字母用下划线连接
-            return f"{base}{''.join(single_letters)}_{'_'.join(multi_letter)}"
-        elif single_letters:
+            return f"{base}{single_str}_{'_'.join(self._multi_exts)}"
+        elif single_str:
             # 只有单字母扩展
-            return f"{base}{''.join(single_letters)}"
-        elif multi_letter:
+            return f"{base}{single_str}"
+        elif self._multi_exts:
             # 只有多字母扩展
-            return f"{base}_{'_'.join(multi_letter)}"
+            return f"{base}_{'_'.join(self._multi_exts)}"
         else:
             # 没有扩展
             return base

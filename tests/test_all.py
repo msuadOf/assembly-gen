@@ -1115,6 +1115,138 @@ class TestCompileVerification(unittest.TestCase):
             self.assertIn("rv64makefiletest", elf_file.name.lower(),
                          f"ELF 文件名应包含 'rv64makefiletest': {elf_file.name}")
 
+    def test_multi_letter_extension_march_format(self):
+        """测试多字母扩展的 -march 格式正确性（AC-1 回归测试）。"""
+        from compile_helper import CompilerConfig
+
+        # 测试用例：(xlen, extensions, expected_march)
+        test_cases = [
+            # 单字母扩展
+            (32, "I", "rv32i"),
+            (32, "IMACFD", "rv32imafdc"),
+            # 单个多字母扩展
+            (32, "zicsr", "rv32i_zicsr"),
+            (32, "IMACFD_zicsr", "rv32imafdc_zicsr"),
+            # 多个多字母扩展（关键测试用例）
+            (32, "I_zicsr_zifencei", "rv32i_zicsr_zifencei"),
+            (32, "Zicsr_Zifencei", "rv32i_zicsr_zifencei"),
+            (32, "IMACFD_zicsr_zifencei", "rv32imafdc_zicsr_zifencei"),
+            # RV64 测试
+            (64, "IMACFD_zicsr", "rv64imafdc_zicsr"),
+            (64, "I_zicsr_zifencei", "rv64i_zicsr_zifencei"),
+        ]
+
+        for xlen, ext, expected in test_cases:
+            with self.subTest(xlen=xlen, ext=ext):
+                config = CompilerConfig(xlen, ext)
+                self.assertEqual(config.march, expected,
+                               f"CompilerConfig({xlen}, '{ext}').march 应为 '{expected}'，实际为 '{config.march}'")
+
+    def test_x30_preservation_in_template(self):
+        """测试模板正确加载 x30 的用户值（AC-3a 回归测试）。"""
+        import tempfile
+        import json
+
+        # 首先验证模板文件包含 li x30, ${x30} 占位符
+        template_content = Path("resource/riscv/template.S").read_text()
+        self.assertIn("li x30, ${x30}", template_content,
+                     "模板应包含 'li x30, ${x30}' 占位符")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建测试用例，指定 x30 的值
+            json_data = {
+                "gen": [{
+                    "arch": {
+                        "name": "riscv",
+                        "xlen": "32",
+                        "pretty-name": "x30test",
+                        "ext": "I"
+                    },
+                    "test-ins": "add x1, x1, x1",
+                    "isa-state": {
+                        "x30": "32'hDEADBEEF"  # 特殊值用于验证
+                    }
+                }]
+            }
+
+            # 生成汇编文件
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            self.assertEqual(len(generated_files), 1)
+            generated_file = Path(generated_files[0])
+            asm_content = generated_file.read_text()
+
+            # 验证生成的文件中 x30 被正确替换
+            self.assertIn("li x30, 0xDEADBEEF", asm_content,
+                         "生成的汇编应包含 'li x30, 0xDEADBEEF'")
+
+            # 验证 x30 初始化在 CSR 初始化之后
+            lines = asm_content.split('\n')
+            csr_init_line = None
+            x30_init_line = None
+            for i, line in enumerate(lines):
+                if 'csrw mstatus' in line or 'csrw mepc' in line:
+                    csr_init_line = i
+                if 'li x30,' in line:
+                    x30_init_line = i
+
+            self.assertIsNotNone(csr_init_line, "应找到 CSR 初始化指令")
+            self.assertIsNotNone(x30_init_line, "应找到 x30 初始化指令")
+            self.assertGreater(x30_init_line, csr_init_line,
+                             "x30 初始化应在 CSR 初始化之后")
+
+    def test_rv64_stack_alignment(self):
+        """测试 RV64 模板的栈对齐正确性（AC-3b 回归测试）。"""
+        import tempfile
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 创建 RV64 测试用例
+            json_data = {
+                "gen": [{
+                    "arch": {
+                        "name": "riscv",
+                        "xlen": "64",
+                        "pretty-name": "rv64align",
+                        "ext": "I"
+                    },
+                    "test-ins": "addw x1, x2, x3",
+                    "isa-state": {
+                        "x2": "64'h0000_0000_0000_0002",
+                        "x3": "64'h0000_0000_0000_0003"
+                    }
+                }]
+            }
+
+            # 生成汇编文件
+            generated_files = process_test_cases(
+                json_data,
+                "resource/riscv/template.S",
+                tmpdir
+            )
+
+            self.assertEqual(len(generated_files), 1)
+            generated_file = Path(generated_files[0])
+            asm_content = generated_file.read_text()
+
+            # 验证栈区域大小为 64 字节（8 字节对齐）
+            self.assertIn(".skip 64", asm_content,
+                         "栈区域应为 64 字节")
+
+            # 验证栈指针初始化使用 +64 偏移（确保 8 字节对齐）
+            self.assertIn(".stack_frame + 64", asm_content,
+                         "RV64 栈指针应使用 +64 偏移以确保 8 字节对齐")
+
+            # 验证 RV64 使用 sd/ld 指令
+            self.assertIn("sd t6,", asm_content,
+                         "RV64 应使用 sd 指令保存 t6")
+            self.assertIn("ld t6,", asm_content,
+                         "RV64 应使用 ld 指令恢复 t6")
+
 
 def run_tests():
     """运行所有测试。"""
