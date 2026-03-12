@@ -331,9 +331,8 @@ def find_toolchain() -> Dict[str, str]:
             # 尝试自动检测 RISC-V gcc（避免原生 gcc）
             tools["gcc"] = check_riscv_gcc("riscv-gcc") or check_riscv_gcc("riscv32-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-elf-gcc")
 
-        # 如果自动检测失败，尝试通用工具链作为最后回退
-        if not tools.get("gcc"):
-            tools["gcc"] = check_tool("gcc") or check_tool("clang")
+        # 注意：当环境变量覆盖被设置时，不回退到原生 gcc
+        # 如果找不到 RISC-V 工具链，让后续验证（line 364）处理并回退到完全自动检测
 
         # 设置 objcopy（使用环境变量或自动检测）
         if env_objcopy:
