@@ -302,6 +302,7 @@ def find_toolchain() -> Dict[str, str]:
                     # 64 位工具链，先尝试 rv64i，失败则尝试 rv32i with ilp32
                     test_result = subprocess.run(
                         [name, "-march=rv64i", "-mabi=lp64", "-c", "-x", "assembler", "-"],
+                        input="",  # 空输入，避免等待 stdin
                         capture_output=True,
                         text=True,
                         timeout=5
@@ -311,6 +312,7 @@ def find_toolchain() -> Dict[str, str]:
                     # 尝试 rv32i with ilp32
                     test_result = subprocess.run(
                         [name, "-march=rv32i", "-mabi=ilp32", "-c", "-x", "assembler", "-"],
+                        input="",  # 空输入，避免等待 stdin
                         capture_output=True,
                         text=True,
                         timeout=5
@@ -321,6 +323,7 @@ def find_toolchain() -> Dict[str, str]:
                     # 32 位工具链或未知，尝试 rv32i
                     test_result = subprocess.run(
                         [name, "-march=rv32i", "-c", "-x", "assembler", "-"],
+                        input="",  # 空输入，避免等待 stdin
                         capture_output=True,
                         text=True,
                         timeout=5
@@ -447,7 +450,8 @@ def find_toolchain() -> Dict[str, str]:
         return tools
 
     # 检查 64 位工具链（仅作为备选）
-    riscv64_gcc = check_tool("riscv64-unknown-elf-gcc") or check_tool("riscv64-unknown-linux-gnu-gcc")
+    # 使用 check_riscv_gcc 验证工具链支持 RISC-V（包括 rv32 编译）
+    riscv64_gcc = check_riscv_gcc("riscv64-unknown-elf-gcc") or check_riscv_gcc("riscv64-unknown-linux-gnu-gcc")
     riscv64_objcopy = check_tool("riscv64-unknown-elf-objcopy") or check_tool("riscv64-unknown-linux-gnu-objcopy")
     riscv64_objdump = check_tool("riscv64-unknown-elf-objdump") or check_tool("riscv64-unknown-linux-gnu-objdump")
 

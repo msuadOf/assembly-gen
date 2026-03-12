@@ -96,5 +96,4 @@ ${x31_init}
     # 使用无限循环终止程序（避免 ecall 依赖 mtvec）
     # 对于模拟器/仿真器，可以检测到此循环并停止执行
     infinite_loop:
-        wfi
         j infinite_loop
