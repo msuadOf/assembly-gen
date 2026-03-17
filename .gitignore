@@ -20,6 +20,7 @@ target/
 *.o
 *.elf
 *.bin
+input/
 
 # IDE
 .vscode/
