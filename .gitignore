@@ -16,6 +16,7 @@ goal-tracker.md
 summary.md
 
 # Build outputs
+build/
 target/
 *.o
 *.elf
