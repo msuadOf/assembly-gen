@@ -84,3 +84,5 @@ _start:
 	li x29, ${X29_VAL}
 	li x30, ${X30_VAL}
 	li x31, ${X31_VAL}
+
+	${test_ins}

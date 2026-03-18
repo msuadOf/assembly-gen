@@ -124,8 +124,9 @@ class Value:
 
 
 # test
-import unittest
-class TestValue(unittest.TestCase):
+import pytest
+
+class TestValue:
     """
     输入格式示例:
     - "64'h0000_0000_0000_0010"
@@ -137,67 +138,64 @@ class TestValue(unittest.TestCase):
 	#========功能测试=======
     def test_64bit_hex(self):
         v = Value("64'h0000_0000_0000_0010")
-        self.assertEqual(v.bits, 16)
-        self.assertEqual(v.len, 64)
-        self.assertEqual(v.mask, 2**64-1)
-        self.assertEqual(v.to_hex(), "0x0000000000000010")
+        assert v.bits == 16
+        assert v.len == 64
+        assert v.mask == 2**64-1
+        assert v.to_hex() == "0x0000000000000010"
 
 
     def test_32bit_binary(self):
         v = Value("32'b0000_0001")
-        self.assertEqual(v.bits, 1)
-        self.assertEqual(v.len, 32)
-        self.assertEqual(v.mask, 2**32-1)
-        self.assertEqual(v.to_hex(), "0x00000001")
+        assert v.bits == 1
+        assert v.len == 32
+        assert v.mask == 2**32-1
+        assert v.to_hex() == "0x00000001"
 
     def test_decimal(self):
         v = Value("32'd42")
-        self.assertEqual(v.bits, 42)
-        self.assertEqual(v.len, 32)
-        self.assertEqual(v.mask, 2**32-1)
+        assert v.bits == 42
+        assert v.len == 32
+        assert v.mask == 2**32-1
 
     def test_with_mask(self):
         v = Value("{64'hffff_ffff_ffff_ffff, 64'h0000_0000_0000_00ff}")
-        self.assertEqual(v.bits, 0xffffffffffffffff)
-        self.assertEqual(v.len, 64)
-        self.assertEqual(v.mask, 0xff)
+        assert v.bits == 0xffffffffffffffff
+        assert v.len == 64
+        assert v.mask == 0xff
         # 应用掩码后应该是0xff
-        self.assertEqual(v.to_hex(), "0x00000000000000ff")
+        assert v.to_hex() == "0x00000000000000ff"
 
     def test_with_binary_mask(self):
         v = Value("{64'hffff_ffff_ffff_ffff, 64'b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1111_1111}")
-        self.assertEqual(v.bits, 0xffffffffffffffff)
-        self.assertEqual(v.len, 64)
-        self.assertEqual(v.mask, 0xff)
-        self.assertEqual(v.to_hex(), "0x00000000000000ff")
+        assert v.bits == 0xffffffffffffffff
+        assert v.len == 64
+        assert v.mask == 0xff
+        assert v.to_hex() == "0x00000000000000ff"
 
     def test_equality(self):
         v1 = Value("32'h0000_0001")
         v2 = Value("32'b0000_0001")
-        self.assertEqual(v1, v2)
+        assert v1 == v2
         # 检查 v1 的属性
-        self.assertEqual(v1.bits, 1)
-        self.assertEqual(v1.len, 32)
-        self.assertEqual(v1.mask, 2**32-1)
+        assert v1.bits == 1
+        assert v1.len == 32
+        assert v1.mask == 2**32-1
         # 检查 v2 的属性
-        self.assertEqual(v2.bits, 1)
-        self.assertEqual(v2.len, 32)
-        self.assertEqual(v2.mask, 2**32-1)
+        assert v2.bits == 1
+        assert v2.len == 32
+        assert v2.mask == 2**32-1
 
 	#边界测试
     def test_length_error(self):
-        with self.assertRaises(ValueError) as context:
+        with pytest.raises(ValueError) as excinfo:
             Value("{32'b10,16'b1}")
-        self.assertIn('"{{32\'b10, 16\'b1}}"', str(context.exception))
-        self.assertIn("32", str(context.exception))
-        self.assertIn("16", str(context.exception))
-    
-    def test_2bit_hex(self):
-        with self.assertRaises(ValueError) as context:
-            Value("2'h1000_0001")
-        self.assertIn('"2\'h', str(context.exception))
-        self.assertIn("0x10000001", str(context.exception))
-        self.assertIn("需要 29 位，但声明的位宽为 2 位", str(context.exception))
+        assert '"{{32\'b10, 16\'b1}}"' in str(excinfo.value)
+        assert "32" in str(excinfo.value)
+        assert "16" in str(excinfo.value)
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_2bit_hex(self):
+        with pytest.raises(ValueError) as excinfo:
+            Value("2'h1000_0001")
+        assert '"2\'h' in str(excinfo.value)
+        assert "0x10000001" in str(excinfo.value)
+        assert "需要 29 位，但声明的位宽为 2 位" in str(excinfo.value)

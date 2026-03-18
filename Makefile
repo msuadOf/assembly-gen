@@ -14,5 +14,10 @@ compile-%:gen
 #对target/目录进行搜索，所有target/template_*.S这样的文件名都被匹配到，然后解析出compile-%需要的目标名字
 TARGET_LIST=$(...) #所有target/template_*.S这样的文件名都被匹配到，解析出"template_"后面的内容
 COMPILE_TARGET_LIST=$(foreach ...) #把解析出来的内容拼接成"compile-xxx"的样子
+
+# commands
+test:
+	python -m pytest src/ -v
+
 run:$(COMPILE_TARGET_LIST)
 .default=run
