@@ -9,20 +9,20 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 OBJDUMP = $(CROSS_COMPILE)objdump
 
 # 架构和 ABI 配置
-MARCH ?= rv64imac
-MABI ?= lp64
+MARCH ?= rv64imafdc
+MABI ?= lp64d
 
 # 编译/汇编选项
 ASFLAGS = -march=$(MARCH) -mabi=$(MABI) \
+	-I$(dir $(lastword $(MAKEFILE_LIST)))../include \
 	$(NULL)
 
-# 链接选项
+# 链接选项（不含 Map，Map 在模式规则中单独处理）
 LDFLAGS = -march=$(MARCH) -mabi=$(MABI) \
 	-nostdlib \
 	-static \
 	-Wl,--build-id=none \
 	-Wl,-Ttext=0x80000000 \
-	-Wl,-Map,$(MAP) \
 	$(NULL)
 
 # objcopy 选项
@@ -41,11 +41,13 @@ $(BUILD_DIR):
 
 # 模式规则：从汇编源文件生成目标文件
 $(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
-	$(CC) $(ASFLAGS) -c -o $@ $<
+	@echo "  AS      $@"
+	@$(CC) $(ASFLAGS) -c -o $@ $<
 
 # 模式规则：从目标文件生成 ELF 文件
 $(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
-	$(CC) $(ASFLAGS) $(LDFLAGS) -o $@ $^
+	@echo "  LD      $@"
+	@$(CC) $(ASFLAGS) $(LDFLAGS) -Wl,-Map,$(@:.elf=.map) -o $@ $^
 
 # 兼容性规则：当 $(SRC) 是单个文件时
 ifneq ($(SRC),)
@@ -53,22 +55,27 @@ ifneq ($(SRC),)
 TARGET_BASE = $(basename $(SRC))
 
 # ELF 文件生成规则
-$(ELF): $(SRC) | $(BUILD_DIR)
-	$(CC) $(ASFLAGS) $(LDFLAGS) -o $@ $^
+# $(ELF): $(SRC) | $(BUILD_DIR)
+# 	$(CC) $(ASFLAGS) $(LDFLAGS) -o $@ $^
 
 # 通用输出格式生成规则（基于 ELF）
 $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
-	$(OBJCOPY) $(OBCOPY_FLAGS) $< $@
+	@echo "  OBJCOPY $@"
+	@$(OBJCOPY) $(OBCOPY_FLAGS) $< $@
 
 $(BUILD_DIR)/%.hex: $(BUILD_DIR)/%.elf
-	$(OBJCOPY) -O ihex $< $@
+	@echo "  OBJCOPY $@"
+	@$(OBJCOPY) -O ihex $< $@
 
 $(BUILD_DIR)/%.dis: $(BUILD_DIR)/%.elf
-	$(OBJDUMP) -d -S $< > $@
+	@echo "  OBJDUMP $@"
+	@$(OBJDUMP) -d -S $< > $@
 
 $(BUILD_DIR)/%.asm: $(BUILD_DIR)/%.elf
-	$(OBJDUMP) -d -S -r $< > $@
+	@echo "  OBJDUMP $@"
+	@$(OBJDUMP) -d -S -r $< > $@
 
 $(BUILD_DIR)/%.dump: $(BUILD_DIR)/%.elf
-	$(OBJDUMP) -s -D $< > $@
+	@echo "  OBJDUMP $@"
+	@$(OBJDUMP) -s -D $< > $@
 endif

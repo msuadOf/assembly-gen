@@ -24,6 +24,15 @@ class RISCV(GenericTarget):
     csrs_list = ["mstatus", "mepc"]
     fprs_list = [f"f{i}" for i in range(32)]
 
+    # privilege 级别映射到宏
+    PRIV_MAP = {
+        "User": "PRV_U",
+        "Supervisor": "PRV_S",
+        "Hypervisor": "PRV_H",
+        "Machine": "PRV_M",
+        "VirtualUser": "PRV_U",
+    }
+
     def __init__(self, json):
         super().__init__(json)
         assert self.arch_name == "riscv"
@@ -34,6 +43,10 @@ class RISCV(GenericTarget):
     def parse_template(self, template: str) -> str:
         # 替换 ${test_ins}
         template = template.replace("${test_ins}", self.test_ins)
+        # 替换 ${cur_privilege}
+        cur_priv = self.isa_state.get("cur_privilege", "Machine")
+        priv_macro = self.PRIV_MAP.get(cur_priv, "PRV_M")
+        template = template.replace("${cur_privilege}", priv_macro)
         for v_str in self.isa_state_table:
             # 模板使用大写+_VAL格式，如 ${X1_VAL}, ${MSTATUS_VAL}
             placeholder = f"${{{v_str.upper()}_VAL}}"

@@ -10,7 +10,7 @@ from src import RISCV, assemgen_core
 def sanitize_filename(name: str, max_length: int = 200) -> str:
     """清理文件名中的特殊字符
 
-    1. 保留括号 ()
+    1. 非字母数字字符替换为下划线（包括括号）
     2. 多个连续下划线合并成一个
     3. 过长的文件名进行截尾
 
@@ -21,8 +21,8 @@ def sanitize_filename(name: str, max_length: int = 200) -> str:
     Returns:
         清理后的文件名部分（不含扩展名）
     """
-    # 保留括号，其他非字母数字字符替换为下划线
-    sanitized = re.sub(r"[^a-zA-Z0-9()]", "_", name)
+    # 非字母数字字符替换为下划线
+    sanitized = re.sub(r"[^a-zA-Z0-9]", "_", name)
 
     # 多个连续下划线合并成一个
     sanitized = re.sub(r"_+", "_", sanitized)

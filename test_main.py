@@ -13,8 +13,8 @@ class TestMain:
         assert sanitize_filename("add x1,x1,x1") == "add_x1_x1_x1"
         assert sanitize_filename("test,with:commas") == "test_with_commas"
         assert sanitize_filename("test with spaces") == "test_with_spaces"
-        # 测试括号保留
-        assert sanitize_filename("test(a,b)") == "test(a_b)"
+        # 测试括号被替换为下划线
+        assert sanitize_filename("test(a,b)") == "test_a_b"
         # 测试多个连续下划线合并
         assert sanitize_filename("test___name") == "test_name"
         # 测试首尾下划线去除
@@ -30,10 +30,10 @@ class TestMain:
         assert (
             generate_output_filename("rv32d", "add x1,x1,x1") == "rv32d_add_x1_x1_x1.S"
         )
-        assert generate_output_filename("rv64i", "lw x10,0(x1)") == "rv64i_lw_x10_0(x1).S"
-        # 测试带 ret_val 的情况，括号被保留
-        assert generate_output_filename("rv32d", "wfi", "Illegal_Instruction(())") == "rv32d_wfi_Illegal_Instruction(()).S"
-        assert generate_output_filename("rv32d", "wfi", "Enter_Wait(WaitReason::zWAIT_WFI(EnumMember_member:0))") == "rv32d_wfi_Enter_Wait(WaitReason_zWAIT_WFI(EnumMember_member_0)).S"
+        assert generate_output_filename("rv64i", "lw x10,0(x1)") == "rv64i_lw_x10_0_x1.S"
+        # 测试带 ret_val 的情况，括号被替换为下划线
+        assert generate_output_filename("rv32d", "wfi", "Illegal_Instruction(())") == "rv32d_wfi_Illegal_Instruction.S"
+        assert generate_output_filename("rv32d", "wfi", "Enter_Wait(WaitReason::zWAIT_WFI(EnumMember_member:0))") == "rv32d_wfi_Enter_Wait_WaitReason_zWAIT_WFI_EnumMember_member_0.S"
 
     def test_main_with_args(self):
         """测试main函数传入参数列表"""
