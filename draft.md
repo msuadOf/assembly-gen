@@ -216,7 +216,7 @@ _start:
 
 3. **CLI 参数处理**
    - `--template` / `-t`: 模板路径
-   - `--output_dir` / `-D`: 输出目录
+   - `--output-dir` / `-o`: 输出目录
    - 位置参数: JSON 文件路径
 
 #### 阶段 2：模板系统（中优先级）
@@ -269,13 +269,13 @@ _start:
 
 ```bash
 # 使用显式模板路径
-python3 main.py --template resource/riscv/template.S example.json --output_dir assembly_output
+python3 main.py --template resource/riscv/template.S example.json --output-dir assembly_output
 
 # 使用短选项
-python3 main.py -t resource/riscv/template.S example.json -D assembly_output
+python3 main.py -t resource/riscv/template.S example.json -o assembly_output
 
 # 使用默认模板路径（从 arch: riscv 推断）
-python3 main.py example.json -D assembly_output
+python3 main.py example.json -o assembly_output
 ```
 
 ### 5.2 编译生成的汇编

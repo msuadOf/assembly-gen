@@ -28,7 +28,7 @@ _start:
 	${CSRs}
 
 	#current_prv
-	SET_PRV t1, ${}
+	SET_PRV t1, ${cur_privilege}
 
 	# FPRs: SET_FPR <fpr>, t1, ${<fpr>_VAL}
 	${FPRs}

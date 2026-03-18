@@ -65,14 +65,16 @@ class Value:
             raise ValueError(f"缺少位宽前缀: '{exp}'，正确格式如 '32'h...'")
 
         # 根据前缀解析数值
-        if value_part.startswith('h') or value_part.startswith('H'):
+        if value_part.startswith("h") or value_part.startswith("H"):
             value = int(value_part[1:], 16) if len(value_part) > 1 else 0
-        elif value_part.startswith('b') or value_part.startswith('B'):
+        elif value_part.startswith("b") or value_part.startswith("B"):
             value = int(value_part[1:], 2) if len(value_part) > 1 else 0
-        elif value_part.startswith('d') or value_part.startswith('D'):
+        elif value_part.startswith("d") or value_part.startswith("D"):
             value = int(value_part[1:], 10) if len(value_part) > 1 else 0
         else:
-            raise ValueError(f"无效的进制前缀: '{exp}'，支持的前缀为 'h'(十六进制), 'b'(二进制), 'd'(十进制)")
+            raise ValueError(
+                f"无效的进制前缀: '{exp}'，支持的前缀为 'h'(十六进制), 'b'(二进制), 'd'(十进制)"
+            )
 
         # 检查实际位宽是否超过声明的位宽
         actual_bitlen = value.bit_length()
@@ -126,6 +128,7 @@ class Value:
 # test
 import pytest
 
+
 class TestValue:
     """
     输入格式示例:
@@ -135,41 +138,42 @@ class TestValue:
     - "{64'h0000_0000_0000_0000, 64'b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000}" 第1个是值，第2个是mask掩码
     """
 
-	#========功能测试=======
+    # ========功能测试=======
     def test_64bit_hex(self):
         v = Value("64'h0000_0000_0000_0010")
         assert v.bits == 16
         assert v.len == 64
-        assert v.mask == 2**64-1
+        assert v.mask == 2**64 - 1
         assert v.to_hex() == "0x0000000000000010"
-
 
     def test_32bit_binary(self):
         v = Value("32'b0000_0001")
         assert v.bits == 1
         assert v.len == 32
-        assert v.mask == 2**32-1
+        assert v.mask == 2**32 - 1
         assert v.to_hex() == "0x00000001"
 
     def test_decimal(self):
         v = Value("32'd42")
         assert v.bits == 42
         assert v.len == 32
-        assert v.mask == 2**32-1
+        assert v.mask == 2**32 - 1
 
     def test_with_mask(self):
         v = Value("{64'hffff_ffff_ffff_ffff, 64'h0000_0000_0000_00ff}")
-        assert v.bits == 0xffffffffffffffff
+        assert v.bits == 0xFFFFFFFFFFFFFFFF
         assert v.len == 64
-        assert v.mask == 0xff
+        assert v.mask == 0xFF
         # 应用掩码后应该是0xff
         assert v.to_hex() == "0x00000000000000ff"
 
     def test_with_binary_mask(self):
-        v = Value("{64'hffff_ffff_ffff_ffff, 64'b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1111_1111}")
-        assert v.bits == 0xffffffffffffffff
+        v = Value(
+            "{64'hffff_ffff_ffff_ffff, 64'b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_1111_1111}"
+        )
+        assert v.bits == 0xFFFFFFFFFFFFFFFF
         assert v.len == 64
-        assert v.mask == 0xff
+        assert v.mask == 0xFF
         assert v.to_hex() == "0x00000000000000ff"
 
     def test_equality(self):
@@ -179,23 +183,23 @@ class TestValue:
         # 检查 v1 的属性
         assert v1.bits == 1
         assert v1.len == 32
-        assert v1.mask == 2**32-1
+        assert v1.mask == 2**32 - 1
         # 检查 v2 的属性
         assert v2.bits == 1
         assert v2.len == 32
-        assert v2.mask == 2**32-1
+        assert v2.mask == 2**32 - 1
 
-	#边界测试
+    # 边界测试
     def test_length_error(self):
         with pytest.raises(ValueError) as excinfo:
             Value("{32'b10,16'b1}")
-        assert '"{{32\'b10, 16\'b1}}"' in str(excinfo.value)
+        assert "\"{{32'b10, 16'b1}}\"" in str(excinfo.value)
         assert "32" in str(excinfo.value)
         assert "16" in str(excinfo.value)
 
     def test_2bit_hex(self):
         with pytest.raises(ValueError) as excinfo:
             Value("2'h1000_0001")
-        assert '"2\'h' in str(excinfo.value)
+        assert "\"2'h" in str(excinfo.value)
         assert "0x10000001" in str(excinfo.value)
         assert "需要 29 位，但声明的位宽为 2 位" in str(excinfo.value)

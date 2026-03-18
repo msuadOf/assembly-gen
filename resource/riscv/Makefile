@@ -6,11 +6,11 @@ TEMPLATE = template.S
 TEMPLATE_HANDWRITTEN_CONVERTOR = convert_handwritten.py
 
 # 从手写模板生成标准模板
+gen_template: $(TEMPLATE)
+
 $(TEMPLATE): $(TEMPLATE_HANDWRITTEN) $(TEMPLATE_HANDWRITTEN_CONVERTOR)
 	@python3 $(TEMPLATE_HANDWRITTEN_CONVERTOR) --template $< --output $@
 	@echo "转换: $< -> $@"
-
-gen_template: $(TEMPLATE)
 
 # ======编译=====
 SRC = $(TEMPLATE) #template.S
@@ -23,7 +23,7 @@ ASM = $(BUILD_DIR)/template.asm
 DUMP = $(BUILD_DIR)/template.dump
 MAP = $(BUILD_DIR)/template.map
 
-include compile.mk
+-include scripts/compile.mk
 
 # 清理
 clean:

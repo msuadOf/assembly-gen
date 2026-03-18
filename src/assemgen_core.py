@@ -1,4 +1,5 @@
-from value import Value
+from .value import Value
+
 
 class GenericTarget:
     def __init__(self, json):
@@ -6,7 +7,7 @@ class GenericTarget:
         self.arch_name = self.arch["name"]
         self.isa_state = json["isa-state"]
         self.test_ins = json["test-ins"]
-        self.ret_val = json["ret_val"]
+        self.ret_val = json.get("ret_val", {})
 
     def get_arch(self):
         self.arch
@@ -16,6 +17,7 @@ class GenericTarget:
 
     def parse_template(self, template: str):
         pass
+
 
 class RISCV(GenericTarget):
     gprs_list = [f"x{i}" for i in range(1, 32)]
@@ -38,17 +40,19 @@ class RISCV(GenericTarget):
             val_str = self.isa_state.get(v_str, f"{self.xlen}'d0")
             template = template.replace(placeholder, Value(val_str).to_hex())
         return template
-            
 
-def assemgen_core(target: GenericTarget,template:str)->str:
+
+def assemgen_core(target: GenericTarget, template: str) -> str:
     return target.parse_template(template)
+
 
 # test
 import json
 import pytest
 
+
 class TestAssemgen:
-    template="""
+    template = """
  .section .text.init;
  .align  6;
  .weak stvec_handler;
@@ -127,8 +131,8 @@ _start:
 
 	${test_ins}
     """
-    
-    json_str="""
+
+    json_str = """
 {
 	"gen":[
 		{

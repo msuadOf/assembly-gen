@@ -1,3 +1,4 @@
+#include "encoding.h"
 
 .macro SET_CSR _csr, _t1, _VAL
     li \_t1, \_VAL
@@ -7,6 +8,13 @@
 .macro SET_FPR _fpr, _t1, _VAL
     li \_t1, \_VAL
 	fmv.w.x \_fpr, \_t1
+.endm
+
+.macro SET_PRV _t1, _PRV
+    li \_t1, 0x1800
+    csrc mstatus, \_t1
+    li \_t1, (\_PRV << 11)
+    csrs mstatus, \_t1
 .endm
 
  .section .text.init;
@@ -19,39 +27,43 @@ _start:
 	# CSRs: SET_CSR <csr>, t1, ${<csr>_VAL}
 	SET_CSR mstatus, t1, ${MSTATUS_VAL}
 	SET_CSR mepc, t1, ${MEPC_VAL}
+
+	#current_prv
+	SET_PRV t1, ${cur_privilege}
+
 	# FPRs: SET_FPR <fpr>, t1, ${<fpr>_VAL}
-	flw f0, ${F0_VAL}(sp)
-	flw f1, ${F1_VAL}(sp)
-	flw f2, ${F2_VAL}(sp)
-	flw f3, ${F3_VAL}(sp)
-	flw f4, ${F4_VAL}(sp)
-	flw f5, ${F5_VAL}(sp)
-	flw f6, ${F6_VAL}(sp)
-	flw f7, ${F7_VAL}(sp)
-	flw f8, ${F8_VAL}(sp)
-	flw f9, ${F9_VAL}(sp)
-	flw f10, ${F10_VAL}(sp)
-	flw f11, ${F11_VAL}(sp)
-	flw f12, ${F12_VAL}(sp)
-	flw f13, ${F13_VAL}(sp)
-	flw f14, ${F14_VAL}(sp)
-	flw f15, ${F15_VAL}(sp)
-	flw f16, ${F16_VAL}(sp)
-	flw f17, ${F17_VAL}(sp)
-	flw f18, ${F18_VAL}(sp)
-	flw f19, ${F19_VAL}(sp)
-	flw f20, ${F20_VAL}(sp)
-	flw f21, ${F21_VAL}(sp)
-	flw f22, ${F22_VAL}(sp)
-	flw f23, ${F23_VAL}(sp)
-	flw f24, ${F24_VAL}(sp)
-	flw f25, ${F25_VAL}(sp)
-	flw f26, ${F26_VAL}(sp)
-	flw f27, ${F27_VAL}(sp)
-	flw f28, ${F28_VAL}(sp)
-	flw f29, ${F29_VAL}(sp)
-	flw f30, ${F30_VAL}(sp)
-	flw f31, ${F31_VAL}(sp)
+	SET_FPR f0, t1, ${F0_VAL}
+	SET_FPR f1, t1, ${F1_VAL}
+	SET_FPR f2, t1, ${F2_VAL}
+	SET_FPR f3, t1, ${F3_VAL}
+	SET_FPR f4, t1, ${F4_VAL}
+	SET_FPR f5, t1, ${F5_VAL}
+	SET_FPR f6, t1, ${F6_VAL}
+	SET_FPR f7, t1, ${F7_VAL}
+	SET_FPR f8, t1, ${F8_VAL}
+	SET_FPR f9, t1, ${F9_VAL}
+	SET_FPR f10, t1, ${F10_VAL}
+	SET_FPR f11, t1, ${F11_VAL}
+	SET_FPR f12, t1, ${F12_VAL}
+	SET_FPR f13, t1, ${F13_VAL}
+	SET_FPR f14, t1, ${F14_VAL}
+	SET_FPR f15, t1, ${F15_VAL}
+	SET_FPR f16, t1, ${F16_VAL}
+	SET_FPR f17, t1, ${F17_VAL}
+	SET_FPR f18, t1, ${F18_VAL}
+	SET_FPR f19, t1, ${F19_VAL}
+	SET_FPR f20, t1, ${F20_VAL}
+	SET_FPR f21, t1, ${F21_VAL}
+	SET_FPR f22, t1, ${F22_VAL}
+	SET_FPR f23, t1, ${F23_VAL}
+	SET_FPR f24, t1, ${F24_VAL}
+	SET_FPR f25, t1, ${F25_VAL}
+	SET_FPR f26, t1, ${F26_VAL}
+	SET_FPR f27, t1, ${F27_VAL}
+	SET_FPR f28, t1, ${F28_VAL}
+	SET_FPR f29, t1, ${F29_VAL}
+	SET_FPR f30, t1, ${F30_VAL}
+	SET_FPR f31, t1, ${F31_VAL}
 	# GPRs: li <gpr>, ${<gpr>_VAL}
 	li x1, ${X1_VAL}
 	li x2, ${X2_VAL}

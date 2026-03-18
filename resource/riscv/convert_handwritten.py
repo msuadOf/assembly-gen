@@ -157,7 +157,7 @@ def main():
     # 构造 FPR 设置代码
     fprs_list = [f"f{i}" for i in range(32)]  # f0-f31
     fpr_codes = [
-        "flw %s, ${%s_VAL}(sp)" % (name, name.upper())
+        "SET_FPR %s, t1, ${%s_VAL}" % (name, name.upper())
         for name in fprs_list
     ]
     fpr_content = "\n".join(fpr_codes)

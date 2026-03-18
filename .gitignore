@@ -28,3 +28,6 @@ input/
 .idea/
 *.swp
 *.swo
+
+
+assembly_output/

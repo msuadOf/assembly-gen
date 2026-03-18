@@ -1,10 +1,10 @@
 gen:
 	#mkdir -p assembly_output
-	python3 main.py --template resource/riscv/template.S example.json --output_dir assembly_output
+	python3 main.py --template resource/riscv/template.S example.json --output-dir assembly_output
 
 gen2:
-	python3 main.py -t resource/riscv/template.S example.json -D assembly_output
-	python3 main.py example.json -D assembly_output
+	python3 main.py -t resource/riscv/template.S example.json -o assembly_output
+	python3 main.py example.json -o assembly_output
 
 compile-%:gen
 	riscv-gcc template_%.S linker.ld -o target/template_%.elf
@@ -16,8 +16,12 @@ TARGET_LIST=$(...) #所有target/template_*.S这样的文件名都被匹配到�
 COMPILE_TARGET_LIST=$(foreach ...) #把解析出来的内容拼接成"compile-xxx"的样子
 
 # commands
+env:
+	python3 -m venv venv
+	source venv/bin/activate && pip install -r requirements.txt
+
 test:
-	python -m pytest src/ -v
+	python -m pytest -v
 
 run:$(COMPILE_TARGET_LIST)
 .default=run
