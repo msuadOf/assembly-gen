@@ -1,28 +1,41 @@
 # RISC-V 裸机汇编编译 Makefile
+TOOL_DIR := $(realpath $(dir $(lastword $(MAKEFILE_LIST)))..)
 
 # 工具链
 CROSS_COMPILE = riscv64-linux-gnu-
 CC = $(CROSS_COMPILE)gcc
-AS = $(CROSS_COMPILE)as
+AS = $(CROSS_COMPILE)gcc
 LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 OBJDUMP = $(CROSS_COMPILE)objdump
 
 # 架构和 ABI 配置
-MARCH ?= rv64imafdc
-MABI ?= lp64d
+# MARCH ?= rv64imafdc
+# MABI ?= lp64d
+MARCH ?= rv32imafdc_zicsr
+MABI ?= ilp32d
 
 # 编译/汇编选项
-ASFLAGS = -march=$(MARCH) -mabi=$(MABI) \
-	-I$(dir $(lastword $(MAKEFILE_LIST)))../include \
-	$(NULL)
+INC_PATH = $(TOOL_DIR)/include
+INCFLAGS = $(addprefix -I, $(INC_PATH))
+
+COMMON_CFLAGS := -fno-pic -march=$(MARCH) -mabi=$(MABI) -mcmodel=medany -mstrict-align
+CFLAGS = $(COMMON_CFLAGS) -static -fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector -Wno-main -fdata-sections -ffunction-sections
+ASFLAGS = $(COMMON_CFLAGS) \
+	$(INCFLAGS) \
+	-O0
+
+# 链接脚本
+LD_SCRIPT = $(TOOL_DIR)/scripts/link.ld
 
 # 链接选项（不含 Map，Map 在模式规则中单独处理）
-LDFLAGS = -march=$(MARCH) -mabi=$(MABI) \
+LDFLAGS = -melf32lriscv \
 	-nostdlib \
 	-static \
-	-Wl,--build-id=none \
-	-Wl,-Ttext=0x80000000 \
+	-T $(LD_SCRIPT) \
+	-e _start \
+	--gc-sections \
+	-z noexecstack \
 	$(NULL)
 
 # objcopy 选项
@@ -42,12 +55,12 @@ $(BUILD_DIR):
 # 模式规则：从汇编源文件生成目标文件
 $(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
 	@echo "  AS      $@"
-	@$(CC) $(ASFLAGS) -c -o $@ $<
+	$(AS) $(ASFLAGS) -c -o $@ $<
 
 # 模式规则：从目标文件生成 ELF 文件
 $(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
 	@echo "  LD      $@"
-	@$(CC) $(ASFLAGS) $(LDFLAGS) -Wl,-Map,$(@:.elf=.map) -o $@ $^
+	$(LD) $(LDFLAGS) -o $@ --start-group $^ --end-group
 
 # 兼容性规则：当 $(SRC) 是单个文件时
 ifneq ($(SRC),)
