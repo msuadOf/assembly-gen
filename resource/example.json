@@ -8,6 +8,7 @@
         "xlen": "32"
       },
       "test-ins": "wfi",
+      "test-ins-encdec": "32'h1050_0073",
       "isa-state": {
         "cur_privilege": "User",
         "mstatus": "64'h0000_0000_0000_0000"
@@ -22,20 +23,7 @@
         "xlen": "32"
       },
       "test-ins": "wfi",
-      "isa-state": {
-        "cur_privilege": "Supervisor",
-        "mstatus": "64'h0000_0000_0000_0000"
-      },
-      "ret_val": "Illegal_Instruction(())"
-    },
-    {
-      "arch": {
-        "ext": "IMACFD",
-        "name": "riscv",
-        "pretty-name": "rv32d",
-        "xlen": "32"
-      },
-      "test-ins": "wfi",
+      "test-ins-encdec": "32'h1050_0073",
       "isa-state": {
         "cur_privilege": "Supervisor",
         "mstatus": "64'h0000_0000_0000_0000"
@@ -50,6 +38,7 @@
         "xlen": "32"
       },
       "test-ins": "wfi",
+      "test-ins-encdec": "32'h1050_0073",
       "isa-state": {
         "cur_privilege": "Machine",
         "mstatus": "64'h0000_0000_0000_0000"

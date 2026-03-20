@@ -19,10 +19,12 @@ MABI ?= ilp32d
 INC_PATH = $(TOOL_DIR)/include
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 
-COMMON_CFLAGS := -fno-pic -march=$(MARCH) -mabi=$(MABI) -mcmodel=medany -mstrict-align
+COMMON_CFLAGS := -nostdlib -nostartfiles -static -fno-pic \
+	-march=$(MARCH) -mabi=$(MABI) -mcmodel=medany -mstrict-align
 CFLAGS = $(COMMON_CFLAGS) -static -fno-asynchronous-unwind-tables -fno-builtin -fno-stack-protector -Wno-main -fdata-sections -ffunction-sections
 ASFLAGS = $(COMMON_CFLAGS) \
 	$(INCFLAGS) \
+	-Wl,--gc-sections \
 	-O0
 
 # 链接脚本
@@ -42,7 +44,7 @@ LDFLAGS = -melf32lriscv \
 OBCOPY_FLAGS = -O binary
 
 # 默认编译目标
-compile: $(BUILD_DIR) $(BIN) $(HEX) $(DIS) $(ASM) $(DUMP)
+compile: $(BUILD_DIR) $(ELF) $(BIN) $(HEX) $(MAP) $(DIS) $(ASM) $(DUMP)
 
 # 创建构建目录
 $(BUILD_DIR):
@@ -52,15 +54,10 @@ $(BUILD_DIR):
 # 通用构建规则
 # ============================================================
 
-# 模式规则：从汇编源文件生成目标文件
-$(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
-	@echo "  AS      $@"
-	$(AS) $(ASFLAGS) -c -o $@ $<
-
-# 模式规则：从目标文件生成 ELF 文件
-$(BUILD_DIR)/%.elf: $(BUILD_DIR)/%.o
-	@echo "  LD      $@"
-	$(LD) $(LDFLAGS) -o $@ --start-group $^ --end-group
+# 模式规则：从目标文件生成 ELF 文件（同时生成 map）
+$(BUILD_DIR)/%.elf: %.S
+	@echo "  ELF      $@"
+	@$(CC) $(ASFLAGS) -T $(LD_SCRIPT) -Wl,-Map=$(@:.elf=.map) -o $@ $<
 
 # 兼容性规则：当 $(SRC) 是单个文件时
 ifneq ($(SRC),)
@@ -74,11 +71,11 @@ TARGET_BASE = $(basename $(SRC))
 # 通用输出格式生成规则（基于 ELF）
 $(BUILD_DIR)/%.bin: $(BUILD_DIR)/%.elf
 	@echo "  OBJCOPY $@"
-	@$(OBJCOPY) $(OBCOPY_FLAGS) $< $@
+	@$(OBJCOPY) -S -j .text $(OBCOPY_FLAGS) $< $@
 
 $(BUILD_DIR)/%.hex: $(BUILD_DIR)/%.elf
 	@echo "  OBJCOPY $@"
-	@$(OBJCOPY) -O ihex $< $@
+	@$(OBJCOPY) -S -j .text -O ihex $< $@
 
 $(BUILD_DIR)/%.dis: $(BUILD_DIR)/%.elf
 	@echo "  OBJDUMP $@"

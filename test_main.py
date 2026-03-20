@@ -60,6 +60,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {
                 "x1": "32'd1"
             }
@@ -78,7 +79,7 @@ class TestMain:
             assert os.path.exists(output_file)
             with open(output_file, "r") as f:
                 content = f.read()
-                assert "add x1,x1,x1" in content
+                assert ".insn 0x00308033" in content
                 assert "li x1, 0x00000001" in content
         finally:
             shutil.rmtree(tmpdir)
@@ -107,6 +108,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {}
         }
     ]
@@ -149,6 +151,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {}
         }
     ]
@@ -196,6 +199,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {}
         }
     ]
@@ -213,6 +217,7 @@ class TestMain:
                 "xlen": 64
             },
             "test-ins": "sub x2,x2,x2",
+            "test-ins-encdec": "32'h4030_8133",
             "isa-state": {}
         }
     ]
@@ -259,6 +264,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {}
         }
     ]
@@ -275,6 +281,7 @@ class TestMain:
                 "xlen": 64
             },
             "test-ins": "sub x2,x2,x2",
+            "test-ins-encdec": "32'h4030_8133",
             "isa-state": {}
         }
     ]
@@ -322,6 +329,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "and x1,x1,x1",
+            "test-ins-encdec": "32'h0030_7033",
             "isa-state": {}
         }
     ]
@@ -342,6 +350,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "or x2,x2,x2",
+            "test-ins-encdec": "32'h4031_6133",
             "isa-state": {}
         }
     ]
@@ -358,6 +367,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "xor x3,x3,x3",
+            "test-ins-encdec": "32'h4032_4233",
             "isa-state": {}
         }
     ]
@@ -403,6 +413,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "wfi",
+            "test-ins-encdec": "32'h1050_0073",
             "isa-state": {
                 "cur_privilege": "User"
             }
@@ -414,6 +425,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "wfi",
+            "test-ins-encdec": "32'h1050_0073",
             "isa-state": {
                 "cur_privilege": "Supervisor"
             }
@@ -425,6 +437,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "wfi",
+            "test-ins-encdec": "32'h1050_0073",
             "isa-state": {
                 "cur_privilege": "Machine"
             }
@@ -472,6 +485,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {}
         }
     ]
@@ -489,6 +503,7 @@ class TestMain:
                 "xlen": 32
             },
             "test-ins": "add x1,x1,x1",
+            "test-ins-encdec": "32'h0030_8033",
             "isa-state": {}
         }
     ]

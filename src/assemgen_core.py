@@ -7,6 +7,7 @@ class GenericTarget:
         self.arch_name = self.arch["name"]
         self.isa_state = json["isa-state"]
         self.test_ins = json["test-ins"]
+        self.test_ins_encdec = json["test-ins-encdec"]
         self.ret_val = json.get("ret_val", {})
 
     def get_arch(self):
@@ -41,8 +42,9 @@ class RISCV(GenericTarget):
         self.isa_state_table = self.gprs_list + self.csrs_list + self.fprs_list
 
     def parse_template(self, template: str) -> str:
-        # 替换 ${test_ins}
-        template = template.replace("${test_ins}", self.test_ins)
+        # 替换 ${test_ins} 为 .insn <hex_value>
+        test_ins_hex = Value(self.test_ins_encdec).to_hex()
+        template = template.replace("${test_ins}", f".insn {test_ins_hex}")
         # 替换 ${cur_privilege}
         cur_priv = self.isa_state.get("cur_privilege", "Machine")
         priv_macro = self.PRIV_MAP.get(cur_priv, "PRV_M")
@@ -156,6 +158,7 @@ _start:
 				"ext": "IMACFD"
 			},
 			"test-ins": "add x1,x1,x1",
+			"test-ins-encdec": "32'h0030_8033",
 			"ret_val": {},
 			"isa-state": {
 				"x1": "32'b0000_0000_0000_0001",
@@ -177,5 +180,5 @@ _start:
         assert "SET_CSR mepc, t1, 0x80000000" in result
         # 验证未定义的寄存器使用默认值0
         assert "li x2, 0x00000000" in result
-        # 验证 test_ins 被替换
-        assert "add x1,x1,x1" in result
+        # 验证 test_ins 被替换为 .insn <hex> 格式
+        assert ".insn 0x00308033" in result
