@@ -1,18 +1,27 @@
 gen:
-	#mkdir -p assembly_output
-	python3 main.py --template resource/riscv/template.S example.json --output_dir assembly_output
+	rm -rf assembly_output && python3 main.py --template resource/riscv/template.S --json-dir input/ --output-dir assembly_output
 
-gen2:
-	python3 main.py -t resource/riscv/template.S example.json -D assembly_output
-	python3 main.py example.json -D assembly_output
+SRC = $(wildcard assembly_output/*.S)
+BUILD_DIR = build
 
-compile-%:gen
-	riscv-gcc template_%.S linker.ld -o target/template_%.elf
-	riscv-objcopy target/template_%.elf target/template_%.hex
-	riscv-objcopy target/template_%.elf target/template_%.bin
-	riscv-objdump target/template_%.elf target/template_%.dump
-#对target/目录进行搜索，所有target/template_*.S这样的文件名都被匹配到，然后解析出compile-%需要的目标名字
-TARGET_LIST=$(...) #所有target/template_*.S这样的文件名都被匹配到，解析出"template_"后面的内容
-COMPILE_TARGET_LIST=$(foreach ...) #把解析出来的内容拼接成"compile-xxx"的样子
+ELF = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.elf,$(SRC))
+BIN = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.bin,$(SRC))
+HEX = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.hex,$(SRC))
+DIS = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.dis,$(SRC))
+ASM = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.asm,$(SRC))
+DUMP = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.dump,$(SRC))
+MAP = $(patsubst assembly_output/%.S,$(BUILD_DIR)/%.map,$(SRC))
+
+VPATH = assembly_output
+
+include resource/riscv/scripts/compile.mk
+# commands
+env:
+	python3 -m venv venv
+	source venv/bin/activate && pip install -r requirements.txt
+
+test:
+	python -m pytest -v
+
 run:$(COMPILE_TARGET_LIST)
 .default=run

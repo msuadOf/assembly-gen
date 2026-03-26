@@ -16,13 +16,18 @@ goal-tracker.md
 summary.md
 
 # Build outputs
+build/
 target/
 *.o
 *.elf
 *.bin
+input/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+
+assembly_output/

@@ -1,0 +1,4 @@
+ASSEMGN_EXE=python3 main.py
+ASSEMGN_OUTPUT_DIR=assembly_output
+
+ASSEMGN_OUTPUT_DIR

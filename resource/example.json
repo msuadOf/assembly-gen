@@ -1,20 +1,49 @@
 {
-	"gen":[
-		{
-			"arch": {
-				"pretty-name": "rv32d",
-				"name": "riscv",
-				"xlen": "32",
-				"ext": "IMACFD"
-			},
-			"test-ins": "add x1,x1,x1",
-			"isa-state": {
-				"x1": "32'b00_01",
-				"csrs": {
-					"mstatus": "32'b0011_00xx_0000_0101",
-					"mepc": "32'h80000000"
-				}
-			}
-		}
-	]
+  "gen": [
+    {
+      "arch": {
+        "ext": "IMACFD",
+        "name": "riscv",
+        "pretty-name": "rv32d",
+        "xlen": "32"
+      },
+      "test-ins": "wfi",
+      "test-ins-encdec": "32'h1050_0073",
+      "isa-state": {
+        "cur_privilege": "User",
+        "mstatus": "64'h0000_0000_0000_0000"
+      },
+      "ret_val": "Illegal_Instruction(())"
+    },
+    {
+      "arch": {
+        "ext": "IMACFD",
+        "name": "riscv",
+        "pretty-name": "rv32d",
+        "xlen": "32"
+      },
+      "test-ins": "wfi",
+      "test-ins-encdec": "32'h1050_0073",
+      "isa-state": {
+        "cur_privilege": "Supervisor",
+        "mstatus": "64'h0000_0000_0000_0000"
+      },
+      "ret_val": "Enter_Wait(WaitReason::zWAIT_WFI(EnumMember.member:0))"
+    },
+    {
+      "arch": {
+        "ext": "IMACFD",
+        "name": "riscv",
+        "pretty-name": "rv32d",
+        "xlen": "32"
+      },
+      "test-ins": "wfi",
+      "test-ins-encdec": "32'h1050_0073",
+      "isa-state": {
+        "cur_privilege": "Machine",
+        "mstatus": "64'h0000_0000_0000_0000"
+      },
+      "ret_val": "Enter_Wait(WaitReason::zWAIT_WFI(EnumMember.member:0))"
+    }
+  ]
 }
